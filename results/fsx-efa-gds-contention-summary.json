@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "experiment": "fsx-efa-gds-contention",
+  "date_utc": "2026-08-27",
+  "status": "validated-single-run",
+  "experiment_boundary": "One controlled synthetic 90-second run per arm on the same two-node Spot P5 allocation. This is topology evidence, not a universal storage or training claim.",
+  "topology": {
+    "scheduler": "AWS ParallelCluster with Slurm",
+    "workers": 2,
+    "worker_capacity": "Spot",
+    "worker_instance_type": "p5.48xlarge",
+    "gpus_per_worker": 8,
+    "gpu_type": "NVIDIA H100 80 GiB",
+    "efa_devices_per_worker": 32,
+    "nccl_world_size": 16,
+    "filesystem": {
+      "type": "FSx for Lustre Persistent_2 SSD",
+      "lustre_version": "2.15",
+      "capacity_gib": 19200,
+      "throughput_mbps_per_tib": 1000,
+      "efa_enabled": true,
+      "mount": "/fsx-efa"
+    }
+  },
+  "software": {
+    "os": "Ubuntu 22.04.5 LTS",
+    "kernel": "6.8.0-1029-aws",
+    "nvidia_driver": "570.86.15",
+    "lustre_client": "2.15.6",
+    "efa_driver": "2.15.0g",
+    "gds_release": "1.13.0.11",
+    "nvidia_fs": "2.24.2",
+    "cuda": "12.8",
+    "nccl": "2.26.2",
+    "aws_ofi_nccl": "1.14.2",
+    "libfabric": "2.1"
+  },
+  "workloads": {
+    "posix_fio_control": {
+      "scope": "one worker",
+      "jobs": 8,
+      "block_size": "1 MiB",
+      "queue_depth_per_job": 32,
+      "size_per_job": "16 GiB",
+      "duration_seconds": 90,
+      "legacy_tcp_fsx": {
+        "write_GBps": 2.479080343,
+        "read_GBps": 2.481424763,
+        "write_mean_latency_ms": 108.2303,
+        "read_mean_latency_ms": 108.1387
+      },
+      "efa_fsx": {
+        "write_GBps": 15.868803522,
+        "read_GBps": 27.803333304,
+        "write_mean_latency_ms": 16.914,
+        "read_mean_latency_ms": 9.652
+      }
+    },
+    "eight_gpu_gds": {
+      "scope": "one worker, all eight GPUs",
+      "transfer_type": "GPUD",
+      "compatibility_fallback_allowed": false,
+      "write_aggregate_GiBps": 20.127683,
+      "read_aggregate_GiBps": 19.643392,
+      "write_mean_latency_us": 1553.28,
+      "read_mean_latency_us": 1591.032
+    },
+    "nccl_only": {
+      "duration_seconds": 90,
+      "tensor_mib_per_rank": 256,
+      "world_size": 16,
+      "algorithmic_payload_GBps": 166.57019444595093,
+      "estimated_bus_GBps": 312.319114586158,
+      "iterations": 55855,
+      "iterations_per_second": 620.522,
+      "validated_value": 1.0
+    },
+    "checkpoint_only": {
+      "duration_seconds": 90,
+      "writers": 2,
+      "writer_placement": "one GPUD writer on GPU 0 of each worker",
+      "threads_per_writer": 4,
+      "size_per_thread": "16 GiB",
+      "aggregate_write_GiBps": 6.624803,
+      "mean_latency_us": 1179.7372475
+    },
+    "synchronized_overlap": {
+      "duration_seconds": 90,
+      "nccl_algorithmic_payload_GBps": 163.4550040885683,
+      "nccl_estimated_bus_GBps": 306.47813266606556,
+      "nccl_iterations": 54810,
+      "nccl_iterations_per_second": 608.917,
+      "checkpoint_aggregate_write_GiBps": 5.659652,
+      "checkpoint_mean_latency_us": 1380.5436205
+    }
+  },
+  "calculated_deltas_percent": {
+    "nccl_algorithmic_payload": -1.8701967466,
+    "checkpoint_write_throughput": -14.5687501953,
+    "checkpoint_mean_latency": 17.021279393
+  },
+  "proof_gates": {
+    "nccl_correct_ranks": "16/16",
+    "nccl_transport": "AWS Libfabric over EFA with GDRDMA",
+    "socket_fallback_records": 0,
+    "gds_transfer_type": "GPUD",
+    "gds_compatibility_fallback_allowed": false,
+    "nvidia_fs_errors": 0,
+    "efa_rdma_write_errors": 0,
+    "efa_rx_drops": 0
+  },
+  "counter_signatures": {
+    "nccl_only": "EFA rdma_write_bytes dominated, approximately 30 TB over the measured interval.",
+    "checkpoint_only": "EFA rdma_read_resp_bytes dominated, approximately 639 GB over the measured interval.",
+    "overlap": "Both signatures appeared during the synchronized workload.",
+    "attribution_caveat": "EFA hardware counters are NIC-aggregate. The isolated arms make these signatures useful for correlation in this experiment, but they are not universal per-process attribution."
+  },
+  "retention": {
+    "spot_workers": "released after user verification",
+    "slurm_hold": "released after user verification",
+    "efa_fsx": "deleted after explicit owner approval; no final backup was created"
+  }
+}

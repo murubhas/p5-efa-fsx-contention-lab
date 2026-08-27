@@ -1,0 +1,22 @@
+region                   = "us-east-2"
+availability_zone        = "us-east-2b"
+vpc_id                   = "vpc-REPLACE_ME"
+private_subnet_id        = "subnet-REPLACE_ME"
+shared_security_group_id = "sg-REPLACE_ME"
+fsx_file_system_id       = "fs-REPLACE_ME"
+data_bucket_name         = "REPLACE_ME"
+
+# Optional, dedicated EFA/GDS storage benchmark. The default 19,200 GiB at
+# 1,000 MB/s/TiB provides 18.75 GB/s of provisioned filesystem throughput.
+create_efa_benchmark_fsx              = false
+efa_benchmark_fsx_storage_capacity_gib = 19200
+
+# Keep a stable name owned only by this dedicated Terraform state.
+cluster_name = "p5-slurm-ddp-proof-tf"
+
+# P5 compute is x86_64. ParallelCluster requires the head node to use the same
+# architecture, so m7g/m8g Graviton instances are not valid for this cluster.
+head_instance_type = "m8i.xlarge"
+
+# For local use only. Prefer role credentials in automation.
+# profile = "my-admin-profile"

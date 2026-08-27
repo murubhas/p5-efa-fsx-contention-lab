@@ -1,0 +1,19 @@
+{
+  "name": "p5-efa-fsx-contention-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A reproducible P5 experiment for NCCL and GPUD checkpoint contention over EFA and FSx for Lustre.",
+  "type": "module",
+  "scripts": {
+    "verify:animation": "node scripts/verify_efa_fsx_animation.mjs",
+    "check:node": "node --check scripts/verify_efa_fsx_animation.mjs",
+    "check:shell": "bash -n scripts/publication_check.sh storage-benchmark/*.sh",
+    "check:python": "python3 -m py_compile storage-benchmark/*.py",
+    "check:terraform": "terraform -chdir=terraform fmt -check -recursive && terraform -chdir=terraform validate && terraform -chdir=terraform test",
+    "check:publication": "bash scripts/publication_check.sh",
+    "check": "npm run check:node && npm run check:shell && npm run check:python && npm run check:terraform && npm run check:publication"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

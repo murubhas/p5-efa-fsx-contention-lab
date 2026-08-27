@@ -1,0 +1,74 @@
+Region: ${AWS_REGION}
+Image:
+  Os: ubuntu2204
+Iam:
+  ResourcePrefix: /parallelcluster/
+HeadNode:
+  InstanceType: ${HEAD_INSTANCE_TYPE}
+  Networking:
+    SubnetId: ${SUBNET_ID}
+    AdditionalSecurityGroups:
+      - ${SECURITY_GROUP_ID}
+  LocalStorage:
+    RootVolume:
+      Size: 100
+      DeleteOnTermination: true
+  Iam:
+    AdditionalIamPolicies:
+      - Policy: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      - Policy: arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+Scheduling:
+  Scheduler: slurm
+  SlurmSettings:
+    ScaledownIdletime: 10
+    QueueUpdateStrategy: DRAIN
+    CustomSlurmSettings:
+      - JobCompType: jobcomp/filetxt
+      - JobCompLoc: /home/slurm/slurm-job-completions.txt
+      - JobAcctGatherType: jobacct_gather/linux
+  SlurmQueues:
+    - Name: p5-spot
+      CapacityType: SPOT
+      Networking:
+        SubnetIds:
+          - ${SUBNET_ID}
+        PlacementGroup:
+          Enabled: false
+        AdditionalSecurityGroups:
+          - ${SECURITY_GROUP_ID}
+      ComputeSettings:
+        LocalStorage:
+          RootVolume:
+            Size: 500
+      ComputeResources:
+        - Name: p5-48xl
+          InstanceType: p5.48xlarge
+          MinCount: 0
+          MaxCount: 2
+          Efa:
+            Enabled: true
+      CustomActions:
+        OnNodeConfigured:
+          Sequence:
+            - Script: https://raw.githubusercontent.com/aws-samples/aws-parallelcluster-post-install-scripts/bb73e4f0a340663d2ac0dbbdf86b870e069331a5/docker/postinstall.sh
+SharedStorage:
+  - Name: fsx
+    MountDir: /fsx
+    StorageType: FsxLustre
+    FsxLustreSettings:
+      FileSystemId: ${FSX_ID}
+Monitoring:
+  DetailedMonitoring: true
+  Logs:
+    CloudWatch:
+      Enabled: true
+  Dashboards:
+    CloudWatch:
+      Enabled: true
+Tags:
+  - Key: Name
+    Value: ${CLUSTER_NAME}
+  - Key: Purpose
+    Value: slurm-distributed-training-proof
+  - Key: auto-delete
+    Value: "no"

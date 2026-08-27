@@ -1,0 +1,34 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.venv*/
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Runtime evidence must be sanitized before publication.
+*.log
+*.out
+*.err
+logs/
+
+# Credentials and local access material.
+*.pem
+*.key
+kubeconfig*
+
+# Rendered environment-specific ParallelCluster configurations.
+cluster.generated.yaml
+*.rendered.yaml
+
+# Terraform local artifacts. Keep .terraform.lock.hcl committed.
+terraform/.terraform/
+terraform/*.tfstate*
+terraform/*.tfplan
+terraform/crash.log
+terraform/override.tf
+terraform/override.tf.json
+terraform/*_override.tf
+terraform/*_override.tf.json
