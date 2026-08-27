@@ -10,6 +10,7 @@ required_files=(
   CONTRIBUTING.md
   cluster.template.yaml
   docs/p5-efa-fsx-contention-animation.html
+  docs/p5-efa-fsx-contention-15min-demo.html
   assets/p5-fsx-efa-gds-contention.svg
   assets/p5-fsx-efa-gds-contention.png
   assets/p5-efa-measurement-attribution.svg
@@ -33,6 +34,7 @@ required_files=(
   terraform/main.tf
   terraform/tests/cluster_contract.tftest.hcl
   scripts/verify_efa_fsx_animation.mjs
+  scripts/verify_efa_fsx_demo_deck.mjs
 )
 
 for file in "${required_files[@]}"; do

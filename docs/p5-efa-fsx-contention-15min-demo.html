@@ -1,0 +1,1657 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="description" content="P5 EFA and FSx contention lab: an EFA-enabled Lustre filesystem reached 11.20x the read throughput of the TCP path, then NCCL collectives and GPUD checkpoint writes were made to share that same fabric to see which workload absorbs the contention.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23ff9900'/%3E%3Cstop offset='1' stop-color='%23ff5c42'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Cg fill='none' stroke='%230b1120' stroke-width='4.5' stroke-linecap='round'%3E%3Cpath d='M12 20h40M12 32h40M12 44h40'/%3E%3Ccircle cx='24' cy='20' r='4.5' fill='%230b1120'/%3E%3Ccircle cx='40' cy='44' r='4.5' fill='%230b1120'/%3E%3C/g%3E%3C/svg%3E">
+<title>P5 EFA + FSx Contention - Fast Storage Is Not Free (15 min)</title>
+<style>
+:root{
+  --void:#05080F; --bg:#0A0F1C; --bg-2:#0D1424; --surf:#121A2C; --surf-2:#182339; --surf-3:#1F2C46;
+  --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.17);
+  --text:#F4F7FF; --body:#B5C1D8; --dim:#7E8CA8;
+  --orange:#FF9900; --ember:#FFBB55; --teal:#00C9E0; --blue:#7290FF; --purple:#AE81FF;
+  --green:#34D67F; --red:#FF6047; --yellow:#FFD34E;
+  --badge-ink:#06090F; --glow-strength:.5;
+  --shadow-1:0 2px 6px rgba(0,0,0,.3); --shadow-2:0 22px 60px -22px rgba(0,0,0,.75);
+  --header-h:62px; --nav-h:50px; --measure:1500px;
+  --accent:var(--orange); --accent-2:var(--ember);
+  /* series colors: transport path, then experiment arm */
+  --c-tcp:#7C8DA8; --c-efa:#04A1B4;
+  --c-iso:#6986F4; --c-ovl:#CB7902;
+  --c-nccl:#9E71ED; --c-ckpt:#04A1B4;
+  /* the source figures are drawn on a near-white ground */
+  --fig-ground:#FBFCFE; --fig-edge:#C6D2E2;
+}
+html[data-theme="light"]{
+  --void:#E7ECF4; --bg:#F6F8FC; --bg-2:#FFFFFF; --surf:#FFFFFF; --surf-2:#F1F5FA; --surf-3:#E6EDF6;
+  --line:rgba(12,21,38,.12); --line-2:rgba(12,21,38,.24);
+  --text:#0B1426; --body:#3B4963; --dim:#64718B;
+  --orange:#A85E00; --ember:#C97A05; --teal:#026E82; --blue:#3550CE; --purple:#6A2FC4;
+  --green:#10743C; --red:#AF2310; --yellow:#85610A;
+  --badge-ink:#FFFFFF; --glow-strength:.16;
+  --shadow-1:0 1px 3px rgba(12,21,38,.1); --shadow-2:0 20px 46px -24px rgba(12,21,38,.32);
+  --c-tcp:#5A6880; --c-efa:#026E82;
+  --c-iso:#3550CE; --c-ovl:#A85E00;
+  --c-nccl:#6A2FC4; --c-ckpt:#026E82;
+}
+*{box-sizing:border-box;min-width:0}
+html{scroll-behavior:smooth;background:var(--bg)}
+body{margin:0;min-width:320px;color:var(--text);background:var(--bg);
+  font-family:"Amazon Ember","Amazon Ember Display",-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+  font-synthesis-weight:none;line-height:1.45;-webkit-font-smoothing:antialiased}
+button,a{font:inherit;color:inherit}
+a{text-decoration:none}
+:is(button,a):focus-visible{outline:2px solid var(--teal);outline-offset:3px;border-radius:4px}
+h1,h2,h3,h4,p,ul,ol,table{margin:0}
+ul,ol{padding:0;list-style:none}
+.mono{font-family:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;font-size:.94em;letter-spacing:-.01em}
+.icon-sprite{position:absolute;width:0;height:0;overflow:hidden}
+.icon{width:1em;height:1em;display:block;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+/* ---------- chrome (fixed px: --u/--t-* are chapter-scoped) ---------- */
+.topbar{position:sticky;top:0;z-index:60;height:var(--header-h);display:flex;align-items:center;
+  justify-content:space-between;gap:16px;padding:0 20px;
+  background:color-mix(in srgb,var(--void) 82%,transparent);backdrop-filter:blur(14px) saturate(1.4);
+  border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:11px;font-size:14px;font-weight:700;letter-spacing:-.01em;white-space:nowrap;overflow:hidden}
+.brand-mark{display:grid;place-items:center;width:26px;height:26px;flex:none;color:var(--badge-ink);
+  border-radius:7px;background:linear-gradient(150deg,var(--orange),var(--red) 130%);
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--orange) 40%,transparent)}
+.brand-mark .icon{width:15px;height:15px;stroke-width:2.6}
+.brand-text{overflow:hidden;color:var(--text);text-overflow:ellipsis}
+.toolbar{display:flex;align-items:center;gap:7px}
+.segmented{display:flex;gap:2px;padding:3px;background:var(--surf);border:1px solid var(--line);border-radius:9px}
+.mode-btn,.icon-btn{height:34px;display:inline-flex;align-items:center;justify-content:center;gap:7px;border:0;
+  color:var(--dim);background:transparent;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700;
+  transition:color .16s ease,background .16s ease,border-color .16s ease}
+.mode-btn{padding:0 13px}
+.mode-btn .icon{font-size:15px}
+.mode-btn[aria-pressed="true"]{color:var(--badge-ink);background:linear-gradient(140deg,var(--orange),var(--ember));box-shadow:var(--shadow-1)}
+.icon-btn{width:36px;border:1px solid var(--line);background:var(--surf);font-size:15px}
+.mode-btn:hover{color:var(--text);background:var(--surf-2)}
+.mode-btn[aria-pressed="true"]:hover{color:var(--badge-ink)}
+.icon-btn:hover{color:var(--text);border-color:var(--line-2);background:var(--surf-2)}
+.chapter-nav{position:sticky;top:var(--header-h);z-index:50;height:var(--nav-h);display:flex;align-items:stretch;gap:1px;
+  padding:0 max(18px,calc((100vw - var(--measure))/2));overflow-x:auto;overflow-y:hidden;
+  background:color-mix(in srgb,var(--void) 88%,transparent);backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--line);scrollbar-width:none}
+.chapter-nav::-webkit-scrollbar{height:0}
+.chapter-link{position:relative;display:flex;align-items:center;gap:8px;min-width:max-content;padding:0 13px;border:0;
+  color:var(--dim);background:transparent;cursor:pointer;font-size:11.5px;font-weight:800;letter-spacing:.09em;
+  text-transform:uppercase;transition:color .16s ease}
+.chapter-link .num{font-size:10.5px;font-variant-numeric:tabular-nums;color:color-mix(in srgb,var(--orange) 78%,var(--dim))}
+.chapter-link::after{content:"";position:absolute;left:11px;right:11px;bottom:0;height:2px;border-radius:2px 2px 0 0;
+  background:transparent;transition:background .18s ease}
+.chapter-link:hover{color:var(--body)}
+.chapter-link.active{color:var(--text)}
+.chapter-link.active .num{color:var(--orange)}
+.chapter-link.active::after{background:linear-gradient(90deg,var(--orange),var(--teal))}
+.progress-track{position:fixed;top:calc(var(--header-h) + var(--nav-h) - 2px);left:0;right:0;z-index:55;height:2px;pointer-events:none}
+.progress-bar{width:0;height:100%;background:linear-gradient(90deg,var(--orange),var(--teal));transition:width .3s cubic-bezier(.22,.8,.3,1)}
+
+/* ---------- chapter shell + fluid scale ---------- */
+.chapter{
+  --fs-base:1; --fs-fit:1; --fs:calc(var(--fs-base)*var(--fs-fit));
+  --t-micro:calc(var(--fs)*11.5px); --t-small:calc(var(--fs)*14px); --t-body:calc(var(--fs)*16px);
+  --t-lede:calc(var(--fs)*21px); --t-h2:calc(var(--fs)*47px); --t-display:calc(var(--fs)*86px);
+  --u:calc(var(--fs)*1px);
+  position:relative;isolation:isolate;min-height:calc(100svh - var(--header-h) - var(--nav-h));
+  display:flex;align-items:center;padding:calc(var(--u)*58) 20px calc(var(--u)*70);
+  scroll-margin-top:calc(var(--header-h) + var(--nav-h));overflow:clip}
+.chapter + .chapter{border-top:1px solid var(--line)}
+.chapter::before{content:"";position:absolute;z-index:-2;top:calc(var(--u)*-190);left:-8%;width:62%;height:calc(var(--u)*520);
+  background:radial-gradient(50% 50% at 50% 50%,color-mix(in srgb,var(--accent) calc(var(--glow-strength)*34%),transparent) 0%,transparent 72%);
+  pointer-events:none}
+.chapter::after{content:attr(data-index);position:absolute;z-index:-1;right:calc(var(--u)*2);bottom:calc(var(--u)*-40);
+  color:transparent;-webkit-text-stroke:1.5px var(--line-2);font-size:calc(var(--u)*320);font-weight:800;
+  line-height:.76;letter-spacing:-.05em;font-variant-numeric:tabular-nums;opacity:.75;pointer-events:none;user-select:none}
+.chapter-inner{position:relative;z-index:1;width:min(100%,var(--measure));margin:0 auto;display:flex;flex-direction:column}
+.rail{position:absolute;z-index:0;top:50%;left:max(6px,calc((100vw - var(--measure))/2 - 34px));display:flex;align-items:center;
+  gap:calc(var(--u)*14);writing-mode:vertical-rl;color:var(--dim);font-size:calc(var(--u)*10.5);font-weight:800;
+  letter-spacing:.26em;text-transform:uppercase;white-space:nowrap;transform:translateY(-50%);pointer-events:none}
+.rail::before{content:"";width:2px;height:calc(var(--u)*62);border-radius:2px;background:linear-gradient(180deg,var(--accent),transparent)}
+.kicker{display:inline-flex;align-items:center;gap:calc(var(--u)*10);margin-bottom:calc(var(--u)*14);color:var(--accent);
+  font-size:var(--t-micro);font-weight:800;letter-spacing:.18em;text-transform:uppercase}
+.kicker::before{content:"";width:calc(var(--u)*26);height:2px;border-radius:2px;background:currentColor}
+.display{max-width:20ch;font-size:var(--t-display);font-weight:800;line-height:.98;letter-spacing:-.035em}
+h2.title{max-width:34ch;margin-bottom:calc(var(--u)*12);font-size:var(--t-h2);font-weight:800;line-height:1.05;
+  letter-spacing:-.028em;text-wrap:balance}
+.grad{background:linear-gradient(96deg,var(--accent) 8%,var(--accent-2) 92%);-webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent}
+.lede{max-width:80ch;color:var(--body);font-size:var(--t-lede);line-height:1.46;text-wrap:pretty}
+.note{color:var(--dim);font-size:var(--t-micro)}
+[data-reveal]{opacity:0;transform:translateY(calc(var(--u)*18));
+  transition:opacity .62s cubic-bezier(.22,.8,.3,1),transform .62s cubic-bezier(.22,.8,.3,1);
+  transition-delay:calc(var(--i,0)*65ms)}
+[data-reveal].in{opacity:1;transform:none}
+body.present-mode [data-reveal]{opacity:1;transform:none;transition:none}
+
+/* ---------- shared bits ---------- */
+.glyph{display:grid;place-items:center;width:calc(var(--u)*44);height:calc(var(--u)*44);color:var(--accent);
+  background:color-mix(in srgb,var(--accent) 12%,var(--bg-2));border:1px solid color-mix(in srgb,var(--accent) 26%,transparent);
+  border-radius:calc(var(--u)*12);font-size:calc(var(--u)*20)}
+.tag{display:inline-flex;align-items:center;gap:calc(var(--u)*6);padding:calc(var(--u)*5) calc(var(--u)*10);
+  color:var(--badge-ink);background:var(--accent);border-radius:calc(var(--u)*6);font-size:var(--t-micro);
+  font-weight:800;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap}
+.tag .icon{font-size:calc(var(--u)*13);stroke-width:2.6}
+.tag.ghost{color:var(--accent);background:color-mix(in srgb,var(--accent) 13%,transparent);
+  border:1px solid color-mix(in srgb,var(--accent) 36%,transparent)}
+.chips{display:flex;flex-wrap:wrap;gap:calc(var(--u)*6)}
+.chip{padding:calc(var(--u)*4) calc(var(--u)*9);color:var(--body);background:var(--bg-2);border:1px solid var(--line);
+  border-radius:calc(var(--u)*6);font-size:calc(var(--u)*11.5);font-weight:700}
+.chip b{color:var(--text)}
+.banner{display:flex;align-items:center;gap:calc(var(--u)*13);padding:calc(var(--u)*15) calc(var(--u)*18);color:var(--body);
+  background:linear-gradient(100deg,color-mix(in srgb,var(--accent) 12%,transparent),transparent 76%);
+  border:1px solid color-mix(in srgb,var(--accent) 28%,transparent);border-radius:calc(var(--u)*12);
+  font-size:var(--t-body);font-weight:700;line-height:1.42}
+.banner .icon{color:var(--accent);font-size:calc(var(--u)*20);stroke-width:2.3}
+.banner b{color:var(--text)}
+.callout{padding:calc(var(--u)*13) calc(var(--u)*16);color:var(--body);
+  background:color-mix(in srgb,var(--yellow) 9%,transparent);border:1px solid color-mix(in srgb,var(--yellow) 30%,transparent);
+  border-radius:calc(var(--u)*11);font-size:var(--t-small);line-height:1.45}
+.callout b{color:var(--text)}
+.callout.hard{background:color-mix(in srgb,var(--red) 9%,transparent);border-color:color-mix(in srgb,var(--red) 30%,transparent)}
+.out{padding:calc(var(--u)*13) calc(var(--u)*15);color:var(--body);background:var(--void);border:1px solid var(--line);
+  border-radius:calc(var(--u)*10);font-size:calc(var(--u)*12.5);line-height:1.66;overflow-wrap:anywhere}
+html[data-theme="light"] .out{background:#0D1424;color:#C3CEE2}
+.out .k{color:#7DD3FC}.out .s{color:#FDE68A}.out .g{color:#86EFAC}.out .r{color:#FCA5A5}.out .c{color:#64748B}
+
+/* ---------- figure-first slides: the figure owns the slide ---------- */
+.figslide{display:flex;flex-direction:column;gap:calc(var(--u)*12)}
+.fig-head{display:flex;align-items:flex-end;justify-content:space-between;gap:calc(var(--u)*20);flex-wrap:wrap}
+.fig-head h2.title{margin-bottom:0;font-size:calc(var(--fs)*36px);max-width:30ch}
+.fig-head .fig-side{display:flex;flex-direction:column;gap:calc(var(--u)*6);align-items:flex-end;text-align:right}
+/* the source figures are drawn on a near-white ground, so keep that ground in
+   dark theme too - the inverse of the treatment the terminal blocks get */
+/* The figures are height-constrained (they are 1800x1320, so filling the
+   available width would make them far too tall). Letting the button stretch
+   full width would therefore paint a wide band of figure-ground either side
+   of the artwork, so the button shrinks to hug the figure instead. */
+.figbtn{display:block;width:fit-content;max-width:100%;margin:0 auto;
+  padding:calc(var(--u)*8);background:var(--fig-ground);border:1px solid var(--fig-edge);
+  border-radius:calc(var(--u)*12);cursor:zoom-in;transition:border-color .18s ease}
+.figbtn:hover{border-color:color-mix(in srgb,var(--accent) 62%,var(--fig-edge))}
+.dgm-svg{display:block;width:auto;max-width:100%;
+  height:min(calc(var(--u)*600),calc(100svh - var(--header-h) - var(--u)*262));letter-spacing:0}
+.fig-cap{display:flex;align-items:center;justify-content:space-between;gap:calc(var(--u)*12);
+  color:var(--dim);font-size:var(--t-micro)}
+.fig-cap .zoomhint{display:inline-flex;align-items:center;gap:calc(var(--u)*6);color:var(--accent);font-weight:700}
+.fig-cap .icon{font-size:calc(var(--u)*13)}
+.figleg{display:flex;flex-wrap:wrap;align-items:center;gap:calc(var(--u)*7) calc(var(--u)*16);
+  padding:calc(var(--u)*8) calc(var(--u)*12);background:color-mix(in srgb,var(--surf) 70%,transparent);
+  border:1px solid var(--line);border-radius:calc(var(--u)*9);color:var(--body);font-size:calc(var(--u)*12)}
+.figleg b{color:var(--text)}
+.figleg .sw{display:inline-flex;align-items:center;gap:calc(var(--u)*7);white-space:nowrap}
+.figleg .dot{width:calc(var(--u)*11);height:calc(var(--u)*11);border-radius:3px;flex:none}
+/* these two chapters carry supporting blocks under the figure, so their
+   figures reserve a little more vertical room */
+#paths .dgm-svg,#attribution .dgm-svg{height:min(calc(var(--u)*545),calc(100svh - var(--header-h) - var(--u)*262))}
+/* On a slide the figure must not win the height fight: these are 1800x1320
+   source diagrams that are unreadable at thumbnail size either way, and the
+   zoom overlay exists for the detail. Capping them here keeps the auto-fit
+   pass from shrinking the surrounding prose to stay on one slide. */
+body.present-mode #paths .dgm-svg,body.present-mode #attribution .dgm-svg{
+  height:min(calc(var(--u)*500),calc(100svh - var(--header-h) - var(--u)*470))}
+/* slim horizontal strip replaces a right-hand column */
+.strip{display:grid;gap:calc(var(--u)*7)}
+.strip-row{display:grid;gap:calc(var(--u)*7)}
+.strip-item{display:flex;align-items:center;gap:calc(var(--u)*8);padding:calc(var(--u)*7) calc(var(--u)*10);
+  background:color-mix(in srgb,var(--surf) 72%,transparent);border:1px solid var(--line);
+  border-left:calc(var(--u)*3) solid var(--sc,var(--accent));border-radius:calc(var(--u)*8);
+  color:var(--body);font-size:calc(var(--u)*12.5);line-height:1.3}
+.strip-item b{color:var(--text);font-weight:800}
+.strip-item .n{color:var(--sc,var(--accent));font-weight:800;font-variant-numeric:tabular-nums;flex:none}
+.strip-item .icon{color:var(--sc,var(--accent));font-size:calc(var(--u)*14);stroke-width:2.8;flex:none}
+
+/* ---------- zoom overlay ---------- */
+.zoom{position:fixed;inset:0;z-index:200;display:none;flex-direction:column;gap:12px;padding:16px;
+  background:color-mix(in srgb,var(--void) 96%,transparent);backdrop-filter:blur(6px)}
+.zoom.open{display:flex}
+.zoom-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--body);font-size:13px;font-weight:700}
+/* top-aligned, not centered: a centered overflowing item cannot be scrolled
+   back up to, which chops the top of the taller figures */
+.zoom-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:flex-start;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.zoom-body:focus-visible{outline:2px solid var(--teal);outline-offset:-2px}
+.zoom-body svg{flex:none;width:100%;height:auto;max-height:none}
+.zoom-body.fit{justify-content:center}
+.zoom-body.fit svg{width:auto;height:100%;max-width:100%}
+
+/* ---------- cards / grids ---------- */
+.grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:calc(var(--u)*12)}
+.grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:calc(var(--u)*12)}
+
+/* ---------- path stacks ---------- */
+.stacks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:calc(var(--u)*12)}
+.stack{display:flex;flex-direction:column;gap:calc(var(--u)*10);padding:calc(var(--u)*16) calc(var(--u)*17);
+  background:var(--surf);border:1px solid var(--line);border-top:calc(var(--u)*3) solid var(--accent);
+  border-radius:calc(var(--u)*4) calc(var(--u)*4) calc(var(--u)*13) calc(var(--u)*13)}
+.stack-h{display:flex;align-items:center;gap:calc(var(--u)*11)}
+.stack-h .glyph{width:calc(var(--u)*34);height:calc(var(--u)*34);font-size:calc(var(--u)*16);border-radius:calc(var(--u)*10)}
+.stack-h b{font-size:var(--t-body);font-weight:800;letter-spacing:-.015em}
+.stack-h span{display:block;color:var(--dim);font-size:calc(var(--u)*11)}
+.hops{display:flex;flex-wrap:wrap;align-items:center;gap:calc(var(--u)*5)}
+.hop{padding:calc(var(--u)*5) calc(var(--u)*9);color:var(--text);background:var(--bg-2);
+  border:1px solid color-mix(in srgb,var(--accent) 30%,var(--line));border-radius:calc(var(--u)*7);
+  font-family:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:calc(var(--u)*11.5);font-weight:700;letter-spacing:-.01em;white-space:nowrap}
+.hop.last{color:var(--badge-ink);background:var(--accent);border-color:transparent}
+.hops .arrow{color:var(--accent);font-size:calc(var(--u)*13);font-weight:800}
+
+/* ---------- arm timeline (condensed from the five-phase animation) ----------
+   The lane fill borrows the animation's marching-dash idiom at the same 850ms
+   cadence, so an active lane reads as traffic in flight rather than as a
+   filled bar. The prefers-reduced-motion block below stops the animation and
+   leaves the stripes as static hatching, which still distinguishes an active
+   lane from an idle one. */
+.arms{display:grid;gap:calc(var(--u)*9)}
+.arm{display:grid;
+  grid-template-columns:calc(var(--u)*156) minmax(0,1fr) calc(var(--u)*76) calc(var(--u)*182);
+  gap:calc(var(--u)*14);align-items:center;padding:calc(var(--u)*12) calc(var(--u)*15);
+  background:var(--surf);border:1px solid var(--line);border-left:calc(var(--u)*3) solid var(--ac,var(--accent));
+  border-radius:calc(var(--u)*11)}
+/* the overlap arm is the point of the slide, so it carries visible weight */
+.arm.contended{border-color:color-mix(in srgb,var(--orange) 42%,var(--line));
+  background:linear-gradient(100deg,color-mix(in srgb,var(--orange) 10%,var(--surf)),var(--surf) 62%);
+  box-shadow:var(--shadow-1)}
+.arm-id b{display:block;font-size:calc(var(--u)*15);font-weight:800;letter-spacing:-.015em}
+.arm-id span{display:block;color:var(--dim);font-size:calc(var(--u)*11);line-height:1.3}
+.arm-id .tag{margin-top:calc(var(--u)*5);width:fit-content}
+.lanes{display:grid;gap:calc(var(--u)*6)}
+.lane{display:grid;grid-template-columns:calc(var(--u)*70) minmax(0,1fr);gap:calc(var(--u)*9);align-items:center}
+.lane > i{color:var(--dim);font-size:calc(var(--u)*10);font-weight:800;letter-spacing:.1em;
+  text-transform:uppercase;font-style:normal;text-align:right}
+.lane.lane-live > i{color:color-mix(in srgb,var(--lc) 82%,var(--text))}
+.lane-track{position:relative;height:calc(var(--u)*22);border-radius:calc(var(--u)*4);
+  background:color-mix(in srgb,var(--line) 55%,transparent)}
+.lane-on,.lane-off{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  border-radius:calc(var(--u)*4);font-size:calc(var(--u)*11);font-weight:800}
+.lane-on{overflow:hidden;color:var(--text);
+  background:linear-gradient(90deg,color-mix(in srgb,var(--lc) 12%,transparent),color-mix(in srgb,var(--lc) 30%,transparent));
+  border:1px solid color-mix(in srgb,var(--lc) 62%,transparent)}
+/* stripes are drawn vertical then skewed, so the horizontal repeat period is
+   exactly 16u and the loop translation matches it seamlessly */
+.lane-on::before{content:"";position:absolute;top:calc(var(--u)*-6);bottom:calc(var(--u)*-6);
+  left:calc(var(--u)*-14);width:calc(100% + var(--u)*40);
+  background:repeating-linear-gradient(90deg,
+    color-mix(in srgb,var(--lc) 58%,transparent) 0 calc(var(--u)*5),
+    transparent calc(var(--u)*5) calc(var(--u)*16));
+  animation:laneFlow 850ms linear infinite}
+@keyframes laneFlow{
+  from{transform:skewX(-22deg) translateX(0)}
+  to{transform:skewX(-22deg) translateX(calc(var(--u)*16))}}
+.lane-on b{position:relative;z-index:1;padding:0 calc(var(--u)*7);
+  background:color-mix(in srgb,var(--surf) 74%,transparent);border-radius:calc(var(--u)*4);
+  font-weight:800;letter-spacing:-.005em}
+.lane-off{color:var(--dim);font-size:calc(var(--u)*10.5);font-weight:700;font-style:italic}
+/* Shared-fabric gutter. The fabric is never idle in any arm - the isolated
+   arms each put roughly 30 TB and 639 GB across it - so it always carries
+   moving traffic. The distinction the slide needs is one path versus two
+   sharing the same NICs, so it is carried by colour count, not by fill. */
+.arm-fabric{display:flex;flex-direction:column;align-items:center;gap:calc(var(--u)*5)}
+.arm-fabric .fab-bar{position:relative;overflow:hidden;
+  width:calc(var(--u)*13);height:calc(var(--u)*52);border-radius:999px;
+  background:color-mix(in srgb,var(--fc,var(--dim)) 20%,transparent);
+  border:1px solid color-mix(in srgb,var(--fc,var(--dim)) 58%,transparent)}
+/* one flowing band per path, so two paths visibly share one pipe */
+.arm-fabric .fab-flow{position:absolute;top:calc(var(--u)*-30);bottom:calc(var(--u)*-30);
+  background:repeating-linear-gradient(180deg,
+    color-mix(in srgb,var(--pc) 92%,transparent) 0 calc(var(--u)*5),
+    transparent calc(var(--u)*5) calc(var(--u)*15));
+  animation:fabricFlow 850ms linear infinite}
+.arm-fabric .fab-flow.full{left:0;right:0}
+.arm-fabric .fab-flow.half-a{left:0;right:50%}
+/* offset by half the period so the two paths interleave instead of marching
+   in lockstep, which would read as one checkerboard rather than two flows */
+.arm-fabric .fab-flow.half-b{left:50%;right:0;animation-delay:-425ms}
+@keyframes fabricFlow{from{transform:translateY(0)}to{transform:translateY(calc(var(--u)*15))}}
+@keyframes fabricFlowH{from{transform:translateX(0)}to{transform:translateX(calc(var(--u)*15))}}
+.arm-fabric i{color:color-mix(in srgb,var(--fc,var(--dim)) 78%,var(--body));
+  font-size:calc(var(--u)*8.5);font-weight:800;letter-spacing:.1em;
+  font-style:normal;text-transform:uppercase;white-space:nowrap}
+/* both paths present: the pipe is split between them and the ring pulses */
+.arm-fabric[data-state="contended"] .fab-bar{
+  border-color:color-mix(in srgb,var(--red) 62%,transparent);
+  animation:fabricPulse 1.4s ease-in-out infinite}
+.arm-fabric[data-state="contended"] i{color:var(--red)}
+@keyframes fabricPulse{
+  0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--red) 50%,transparent)}
+  50%{box-shadow:0 0 0 calc(var(--u)*6) transparent}}
+.arm-res{display:grid;gap:calc(var(--u)*3);justify-items:end;text-align:right}
+.arm-res b{color:var(--text);font-size:calc(var(--u)*13);font-weight:800;font-variant-numeric:tabular-nums}
+.arm-res i{color:var(--dim);font-size:calc(var(--u)*10.5);font-weight:700;font-style:normal}
+.arm-res em{font-style:normal;font-weight:800;font-size:calc(var(--u)*12);font-variant-numeric:tabular-nums;
+  color:var(--rc,var(--text));padding:calc(var(--u)*2) calc(var(--u)*8);border-radius:calc(var(--u)*6);
+  background:color-mix(in srgb,var(--rc) 14%,transparent);
+  border:1px solid color-mix(in srgb,var(--rc) 44%,transparent)}
+/* aligned to the lane tracks: 3 border + 15 pad + 156 id + 14 gap + 70 label + 9 gap
+   on the left, and 15 pad + 182 results + 14 gap + 76 fabric + 14 gap on the right */
+.tl{display:flex;align-items:center;justify-content:space-between;
+  padding-left:calc(var(--u)*267);padding-right:calc(var(--u)*301);
+  color:var(--dim);font-size:calc(var(--u)*10.5);font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.tl span:first-child,.tl span:last-child{display:inline-flex;align-items:center;gap:calc(var(--u)*6)}
+.tl span:first-child::before,.tl span:last-child::after{content:"";width:1px;height:calc(var(--u)*9);
+  background:color-mix(in srgb,var(--dim) 70%,transparent)}
+
+/* ---------- tables ---------- */
+.dtable{width:100%;border-collapse:separate;border-spacing:0 calc(var(--u)*4);font-size:var(--t-small)}
+.dtable th{padding:calc(var(--u)*7) calc(var(--u)*12);color:var(--dim);text-align:left;font-size:calc(var(--u)*10.5);
+  font-weight:800;letter-spacing:.16em;text-transform:uppercase}
+.dtable th.r,.dtable td.r{text-align:right;font-variant-numeric:tabular-nums}
+.dtable td{padding:calc(var(--u)*10) calc(var(--u)*12);background:var(--surf);color:var(--body);vertical-align:middle}
+.dtable tbody tr td:first-child{border-left:calc(var(--u)*3) solid var(--rc,var(--line-2));
+  border-radius:calc(var(--u)*9) 0 0 calc(var(--u)*9);color:var(--text);font-weight:800}
+.dtable tbody tr td:last-child{border-radius:0 calc(var(--u)*9) calc(var(--u)*9) 0}
+.dtable td b{color:var(--text)}
+
+/* ---------- charts ---------- */
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:calc(var(--u)*22)}
+.chart{display:flex;flex-direction:column;gap:calc(var(--u)*10);min-width:0}
+.chart-h{display:flex;align-items:baseline;justify-content:space-between;gap:calc(var(--u)*10)}
+.chart-h b{font-size:var(--t-body);font-weight:800;letter-spacing:-.015em}
+.chart-h span{color:var(--dim);font-size:var(--t-micro)}
+.bars{display:grid;gap:calc(var(--u)*9)}
+.bar-row{display:grid;grid-template-columns:calc(var(--u)*128) 1fr auto;gap:calc(var(--u)*11);align-items:center}
+.bar-row .cat{color:var(--body);font-size:calc(var(--u)*12.5);font-weight:700}
+.bar-track{position:relative;height:calc(var(--u)*22);background:color-mix(in srgb,var(--line) 60%,transparent);border-radius:calc(var(--u)*3)}
+.bar-fill{position:absolute;inset:0 auto 0 0;width:var(--w);background:var(--bc);
+  border-radius:calc(var(--u)*3) calc(var(--u)*4) calc(var(--u)*4) calc(var(--u)*3)}
+.bar-row .val{color:var(--text);font-size:var(--t-small);font-weight:800;font-variant-numeric:tabular-nums;
+  min-width:calc(var(--u)*80);text-align:right}
+.bar-row .val s{color:var(--dim);font-weight:600;text-decoration:none}
+.axis{display:flex;justify-content:space-between;padding-left:calc(var(--u)*139);color:var(--dim);
+  font-size:calc(var(--u)*10.5);font-variant-numeric:tabular-nums}
+.gchart{position:relative;display:grid;grid-template-columns:calc(var(--u)*44) 1fr;gap:calc(var(--u)*10)}
+.yaxis{display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;
+  height:calc(var(--u)*216);color:var(--dim);font-size:calc(var(--u)*10.5);font-variant-numeric:tabular-nums}
+.plot{position:relative;height:calc(var(--u)*216);display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:calc(var(--u)*18);align-items:end}
+.plot::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(to top,transparent 0,transparent calc(16.6667% - 1px),var(--line) calc(16.6667% - 1px),var(--line) 16.6667%)}
+/* the 100% reference line: every left bar sits exactly on it. The chart
+   subtitle already names it, so the line carries no label of its own -
+   a label here would sit behind the one bar that rises above the line. */
+.plot .ref{position:absolute;left:0;right:0;bottom:83.333%;height:0;
+  border-top:1px dashed color-mix(in srgb,var(--dim) 70%,transparent);pointer-events:none}
+.pair{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:2px;align-items:end;height:100%}
+.vbar{position:relative;height:var(--h);background:var(--bc);border-radius:calc(var(--u)*4) calc(var(--u)*4) 0 0;min-height:2px}
+.vbar .vl{position:absolute;left:50%;bottom:calc(100% + var(--u)*5);transform:translateX(-50%);color:var(--text);
+  font-size:calc(var(--u)*11);font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* a bar near the top of the axis has no room above it for its own value,
+   so that label moves inside the bar instead of into the chart header */
+.vbar.tall .vl{bottom:auto;top:calc(var(--u)*6);color:var(--badge-ink)}
+.xaxis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:calc(var(--u)*18);
+  padding-left:calc(var(--u)*54);margin-top:calc(var(--u)*7)}
+.xaxis span{color:var(--body);font-size:calc(var(--u)*12.5);font-weight:800;text-align:center;line-height:1.25}
+.xaxis span i{display:block;color:var(--dim);font-size:calc(var(--u)*10.5);font-weight:700;font-style:normal}
+.legend{display:flex;flex-wrap:wrap;gap:calc(var(--u)*16)}
+.legend i{display:inline-flex;align-items:center;gap:calc(var(--u)*7);color:var(--body);font-size:var(--t-small);font-weight:700;font-style:normal}
+.legend i::before{content:"";width:calc(var(--u)*12);height:calc(var(--u)*12);border-radius:calc(var(--u)*3);background:var(--bc)}
+
+/* ---------- delta tiles / gates / badges ---------- */
+.deltas{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:calc(var(--u)*10)}
+.delta{display:flex;flex-direction:column;gap:calc(var(--u)*5);padding:calc(var(--u)*14) calc(var(--u)*15);
+  background:var(--surf);border:1px solid var(--line);border-left:calc(var(--u)*3) solid var(--dc,var(--line-2));border-radius:calc(var(--u)*11)}
+.delta .dk{color:var(--dim);font-size:calc(var(--u)*10.5);font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+.delta .dv{color:var(--dc,var(--text));font-size:calc(var(--u)*26);font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.delta .dn{color:var(--body);font-size:calc(var(--u)*11.5);line-height:1.35}
+.vpass{display:inline-flex;align-items:center;gap:calc(var(--u)*5);padding:calc(var(--u)*4) calc(var(--u)*9);
+  color:#04160C;background:linear-gradient(180deg,#57F5A0,#12C566);border-radius:calc(var(--u)*5);
+  font-size:calc(var(--u)*10.5);font-weight:800;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.4)}
+.vpass .icon{font-size:calc(var(--u)*12);stroke-width:3}
+.ev{display:inline-flex;align-items:center;gap:calc(var(--u)*6);padding:calc(var(--u)*4) calc(var(--u)*9);
+  border-radius:calc(var(--u)*5);font-size:calc(var(--u)*10.5);font-weight:800;letter-spacing:.06em;
+  text-transform:uppercase;white-space:nowrap;border:1px solid transparent}
+.ev .icon{font-size:calc(var(--u)*11);stroke-width:3}
+.ev-con{color:var(--dim);background:color-mix(in srgb,var(--dim) 14%,transparent);border-color:color-mix(in srgb,var(--dim) 34%,transparent)}
+.ev-obs{color:var(--teal);background:color-mix(in srgb,var(--teal) 13%,transparent);border-color:color-mix(in srgb,var(--teal) 36%,transparent)}
+.ev-mea{color:var(--blue);background:color-mix(in srgb,var(--blue) 13%,transparent);border-color:color-mix(in srgb,var(--blue) 36%,transparent)}
+.ev-dir{color:var(--yellow);background:color-mix(in srgb,var(--yellow) 13%,transparent);border-color:color-mix(in srgb,var(--yellow) 38%,transparent)}
+.ev-no{color:var(--red);background:color-mix(in srgb,var(--red) 13%,transparent);border-color:color-mix(in srgb,var(--red) 38%,transparent)}
+
+/* ---------- software contract ---------- */
+.spec{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:calc(var(--u)*9)}
+.spec-item{display:flex;flex-direction:column;gap:calc(var(--u)*4);padding:calc(var(--u)*12) calc(var(--u)*13);
+  background:var(--surf);border:1px solid var(--line);border-top:calc(var(--u)*3) solid var(--sc,var(--accent));
+  border-radius:calc(var(--u)*4) calc(var(--u)*4) calc(var(--u)*11) calc(var(--u)*11)}
+.spec-item span{color:var(--dim);font-size:calc(var(--u)*10.5);font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.spec-item b{color:var(--text);font-size:calc(var(--u)*17);font-weight:800;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+
+/* ---------- repo panel ---------- */
+.repo{display:grid;grid-template-columns:minmax(0,1.14fr) minmax(calc(var(--u)*300),.86fr);gap:calc(var(--u)*30);align-items:stretch}
+.repo-list{display:grid;grid-template-columns:1fr 1fr;gap:calc(var(--u)*9);align-content:center}
+.repo-item{display:grid;grid-template-columns:auto 1fr;gap:calc(var(--u)*12);align-items:center;
+  padding:calc(var(--u)*13) calc(var(--u)*15);background:var(--surf);border:1px solid var(--line);border-radius:calc(var(--u)*11)}
+.repo-item .glyph{width:calc(var(--u)*32);height:calc(var(--u)*32);font-size:calc(var(--u)*14);border-radius:calc(var(--u)*9)}
+.repo-item strong{display:block;font-size:var(--t-small);font-weight:800}
+.repo-item span{color:var(--dim);font-size:var(--t-micro)}
+.repo-panel{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:calc(var(--u)*12);
+  padding:calc(var(--u)*24);text-align:center;background:linear-gradient(168deg,var(--bg-2),var(--surf));
+  border:1px solid var(--line-2);border-radius:calc(var(--u)*18);box-shadow:var(--shadow-2)}
+.qr-wrap{width:calc(var(--u)*164);height:calc(var(--u)*164);padding:calc(var(--u)*10);background:#FFF;
+  border-radius:calc(var(--u)*12);box-shadow:0 0 0 1px var(--line-2)}
+.qr-svg{display:block;width:100%;height:100%}
+.repo-panel h3{font-size:calc(var(--u)*21);font-weight:800;letter-spacing:-.024em}
+.repo-url{color:var(--teal);font-size:var(--t-small);overflow-wrap:anywhere}
+.repo-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:calc(var(--u)*9)}
+.btn{display:inline-flex;align-items:center;gap:calc(var(--u)*8);min-height:calc(var(--u)*36);padding:0 calc(var(--u)*14);
+  color:var(--text);background:var(--surf-2);border:1px solid var(--line-2);border-radius:calc(var(--u)*9);cursor:pointer;
+  font-size:var(--t-small);font-weight:800;transition:transform .16s ease,border-color .16s ease}
+.btn .icon{font-size:calc(var(--u)*15)}
+.btn:hover{transform:translateY(-1px);border-color:var(--teal)}
+.btn.primary{color:var(--badge-ink);background:linear-gradient(140deg,var(--orange),var(--ember));border-color:transparent}
+.closing{font-size:calc(var(--u)*19);font-weight:700;letter-spacing:-.015em}
+.closing b{color:var(--orange)}
+.closing span{color:var(--dim);font-weight:600}
+
+/* ---------- hero ---------- */
+.hero{display:grid;grid-template-columns:minmax(0,1.02fr) minmax(calc(var(--u)*420),.98fr);align-items:center;gap:calc(var(--u)*48)}
+.hero .display{margin-bottom:calc(var(--u)*18);max-width:15ch}
+.hero-lede{max-width:48ch;margin-bottom:calc(var(--u)*22);color:var(--body);font-size:calc(var(--u)*22);line-height:1.44}
+.topics{display:flex;flex-wrap:wrap;gap:calc(var(--u)*7);margin-bottom:calc(var(--u)*28)}
+.topic{padding:calc(var(--u)*6) calc(var(--u)*11);color:var(--body);background:var(--surf);border:1px solid var(--line);
+  border-radius:999px;font-size:var(--t-small);font-weight:700}
+.topic b{color:var(--text)}
+.presenter{display:inline-grid;grid-template-columns:calc(var(--u)*4) auto;gap:calc(var(--u)*15);align-items:stretch}
+.presenter::before{content:"";border-radius:4px;background:linear-gradient(180deg,var(--teal),var(--blue))}
+.p-name{display:block;font-size:calc(var(--u)*20);font-weight:800;letter-spacing:-.015em}
+.p-role{display:block;color:var(--body);font-size:var(--t-small);font-weight:600}
+.p-org{display:block;margin-top:calc(var(--u)*3);color:var(--orange);font-size:var(--t-small);font-weight:700}
+.p-team{display:block;color:var(--dim);font-size:var(--t-small);font-weight:600}
+.console{position:relative;padding:calc(var(--u)*22);background:linear-gradient(165deg,var(--bg-2),var(--surf) 130%);
+  border:1px solid var(--line-2);border-radius:calc(var(--u)*18);box-shadow:var(--shadow-2)}
+.console-head{display:flex;align-items:center;justify-content:space-between;gap:calc(var(--u)*12);
+  padding-bottom:calc(var(--u)*13);border-bottom:1px solid var(--line);color:var(--dim);font-size:var(--t-micro);font-weight:700}
+.live{display:inline-flex;align-items:center;gap:calc(var(--u)*7);color:var(--green);letter-spacing:.08em;text-transform:uppercase}
+.live::before{content:"";width:calc(var(--u)*7);height:calc(var(--u)*7);border-radius:50%;background:currentColor;
+  box-shadow:0 0 0 0 color-mix(in srgb,currentColor 55%,transparent);animation:ping 2.4s ease-out infinite}
+@keyframes ping{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 55%,transparent)}
+  70%{box-shadow:0 0 0 calc(var(--u)*8) transparent}100%{box-shadow:0 0 0 0 transparent}}
+.console .out{margin-top:calc(var(--u)*14);border:0;border-radius:calc(var(--u)*9)}
+.console-foot{display:flex;align-items:center;gap:calc(var(--u)*11);margin-top:calc(var(--u)*13);
+  padding:calc(var(--u)*12) calc(var(--u)*14);color:var(--body);background:color-mix(in srgb,var(--green) 10%,transparent);
+  border:1px solid color-mix(in srgb,var(--green) 26%,transparent);border-radius:calc(var(--u)*10);font-size:var(--t-small)}
+.console-foot .icon{color:var(--green);font-size:calc(var(--u)*17);stroke-width:2.4}
+.console-foot b{color:var(--text)}
+
+/* ---------- present mode ---------- */
+.present-bar{position:fixed;left:50%;bottom:16px;z-index:90;display:none;align-items:center;gap:8px;padding:6px;
+  background:color-mix(in srgb,var(--void) 90%,transparent);backdrop-filter:blur(12px);border:1px solid var(--line-2);
+  border-radius:12px;box-shadow:var(--shadow-2);transform:translateX(-50%)}
+.counter{min-width:62px;color:var(--body);text-align:center;font-size:14px;font-weight:800;font-variant-numeric:tabular-nums}
+.counter b{color:var(--text)}
+body.present-mode{height:100svh;overflow:hidden}
+body.present-mode .chapter-nav{display:none}
+body.present-mode .progress-track{top:calc(var(--header-h) - 2px)}
+body.present-mode main{height:calc(100svh - var(--header-h))}
+body.present-mode .present-bar{display:flex}
+body.present-mode .chapter{display:none;height:calc(100svh - var(--header-h));min-height:0;
+  padding:calc(var(--u)*22) 24px calc(var(--u)*58);border-top:0;overflow:clip}
+body.present-mode .chapter.overflowing{overflow:auto}
+body.present-mode .chapter.active{display:flex;animation:slide-in .34s cubic-bezier(.22,.8,.3,1)}
+@keyframes slide-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+body.present-mode .chapter::after{bottom:calc(var(--u)*-26);font-size:calc(var(--u)*210)}
+
+/* ---------- responsive ---------- */
+@media (max-width:1360px){.chapter{--fs-base:.94}}
+@media (max-width:1180px){.chapter{--fs-base:.88}}
+@media (max-width:1080px){
+  .chapter{--fs-base:.92;padding-left:18px;padding-right:18px}
+  .rail{display:none}
+  .hero,.repo,.charts{grid-template-columns:minmax(0,1fr)}
+  .spec{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .deltas{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .arm{grid-template-columns:calc(var(--u)*140) minmax(0,1fr)}
+  /* the fabric gutter turns horizontal once the results wrap below the lanes,
+     so the flow bands and their motion rotate with it */
+  .arm-fabric{grid-column:1 / -1;flex-direction:row;justify-content:flex-start;gap:calc(var(--u)*9)}
+  .arm-fabric .fab-bar{width:calc(var(--u)*120);height:calc(var(--u)*11)}
+  .arm-fabric .fab-flow{top:0;bottom:0;left:calc(var(--u)*-30);right:calc(var(--u)*-30);
+    background:repeating-linear-gradient(90deg,
+      color-mix(in srgb,var(--pc) 92%,transparent) 0 calc(var(--u)*5),
+      transparent calc(var(--u)*5) calc(var(--u)*15));
+    animation-name:fabricFlowH}
+  .arm-fabric .fab-flow.half-a{top:0;bottom:50%}
+  .arm-fabric .fab-flow.half-b{top:50%;bottom:0}
+  .arm-res{grid-column:1 / -1;justify-items:start;text-align:left;grid-auto-flow:column;gap:calc(var(--u)*14)}
+  .tl{padding:0}
+}
+@media (max-width:860px){
+  :root{--header-h:56px;--nav-h:46px}
+  .chapter{--fs-base:.86;padding-top:calc(var(--u)*44)}
+  .toolbar .hide-sm{display:none}
+  .grid-3,.grid-2,.stacks{grid-template-columns:1fr 1fr}
+  .spec{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .repo-list{grid-template-columns:1fr}
+  .fig-head{flex-direction:column;align-items:flex-start}
+  .fig-head .fig-side{align-items:flex-start;text-align:left}
+}
+@media (max-width:600px){
+  .chapter{--fs-base:.8}
+  .brand-text{display:none}
+  .mode-btn{padding:0 10px}
+  .mode-btn .label,.chapter-link .label{display:none}
+  .chapter-link{padding:0 11px}
+  .grid-3,.grid-2,.stacks,.spec,.deltas{grid-template-columns:1fr}
+  .arm{grid-template-columns:minmax(0,1fr)}
+  .chapter::after{font-size:calc(var(--u)*200)}
+  body.present-mode .chapter{overflow:auto}
+}
+@media (max-height:600px){.rail{display:none}}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation:none!important;transition:none!important}
+  [data-reveal]{opacity:1!important;transform:none!important}
+}
+@media print{
+  :root{--void:#FFF;--bg:#FFF;--bg-2:#FFF;--surf:#F5F7FA;--surf-2:#EEF2F7;--surf-3:#E6ECF4;
+    --line:#C3CCD8;--line-2:#9AA6B6;--text:#0B1426;--body:#37455E;--dim:#5D6A80;
+    --orange:#9A5600;--teal:#02657A;--blue:#2F49BE;--purple:#612AB8;--green:#0E6B37;--red:#A22110;--yellow:#7B5A09;
+    --badge-ink:#FFF;--glow-strength:0;--shadow-1:none;--shadow-2:none;
+    --c-tcp:#5A6880;--c-efa:#02657A;--c-iso:#2F49BE;--c-ovl:#9A5600;--c-nccl:#612AB8;--c-ckpt:#02657A}
+  .topbar,.chapter-nav,.progress-track,.present-bar,.toast,.zoom{display:none!important}
+  body{background:#FFF}
+  .chapter{display:flex!important;--fs-base:.8;min-height:100vh;padding:24px 28px;border-top:0;
+    page-break-after:always;break-after:page}
+  .chapter:last-child{page-break-after:auto;break-after:auto}
+  .chapter::before{display:none}
+  .chapter::after{-webkit-text-stroke-color:#DCE3EC}
+  [data-reveal]{opacity:1!important;transform:none!important}
+  .out{background:#131B2E!important;color:#C3CEE2!important}
+  .dgm-svg{height:auto!important;max-height:60vh}
+}
+.toast{position:fixed;left:50%;bottom:22px;z-index:220;padding:10px 14px;color:var(--text);
+  background:color-mix(in srgb,var(--void) 94%,transparent);border:1px solid var(--line-2);border-radius:9px;
+  box-shadow:var(--shadow-2);opacity:0;pointer-events:none;transform:translate(-50%,10px);
+  transition:opacity .18s ease,transform .18s ease;font-size:13px;font-weight:700}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+
+<svg class="icon-sprite" aria-hidden="true">
+<symbol id="i-read" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></symbol>
+<symbol id="i-present" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M4 3v13h16V3"/><path d="m8 21 4-5 4 5"/></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></symbol>
+<symbol id="i-print" viewBox="0 0 24 24"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></symbol>
+<symbol id="i-full" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+<symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+<symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+<symbol id="i-zoom" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4M11 8v6M8 11h6"/></symbol>
+<symbol id="i-fit" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></symbol>
+<symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6h.01M7 17h.01"/></symbol>
+<symbol id="i-net" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 3.8 5.6 3.8 9S14.5 21 12 21s-3.8-2.6-3.8-6S9.5 5.5 12 3z"/></symbol>
+<symbol id="i-route" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M5 8.5V14a4 4 0 0 0 4 4h7.5M12 6h4a3 3 0 0 1 3 3v6.5"/></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 9 5-9 5-9-5 9-5z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></symbol>
+<symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4 18a9 9 0 1 1 16 0"/><path d="m12 14 4-4"/><circle cx="12" cy="15" r="1.5"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></symbol>
+<symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></symbol>
+<symbol id="i-github" viewBox="0 0 24 24"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.3-.4 6.8-1.6 6.8-7A5.4 5.4 0 0 0 19.4 4 5 5 0 0 0 19.3.5S18.2.1 15 1.8a13.4 13.4 0 0 0-7 0C4.8.1 3.7.5 3.7.5A5 5 0 0 0 3.6 4a5.4 5.4 0 0 0-1.4 3.7c0 5.4 3.5 6.6 6.8 7A4.8 4.8 0 0 0 8 18v4"/><path d="M8 19c-3 .9-3-1.5-4-2"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+<symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+<symbol id="i-flask" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6.5L4.5 18A2 2 0 0 0 6.3 21h11.4a2 2 0 0 0 1.8-3L14 9.5V3"/><path d="M7 15h10"/></symbol>
+<symbol id="i-braces" viewBox="0 0 24 24"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></symbol>
+<symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5.5" rx="8" ry="3.2"/><path d="M4 5.5v13c0 1.8 3.6 3.2 8 3.2s8-1.4 8-3.2v-13"/><path d="M4 12c0 1.8 3.6 3.2 8 3.2s8-1.4 8-3.2"/></symbol>
+<symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></symbol>
+<symbol id="i-scale" viewBox="0 0 24 24"><path d="M12 3v18M7 21h10M4 8h16"/><path d="M4 8 1.5 15h5L4 8zM20 8l-2.5 7h5L20 8z"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8V4z"/></symbol>
+</svg>
+
+<header class="topbar">
+  <a class="brand" href="#overview" aria-label="Go to overview">
+    <span class="brand-mark" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-route"></use></svg></span>
+    <span class="brand-text">P5 EFA + FSx Contention Lab</span>
+  </a>
+  <div class="toolbar">
+    <div class="segmented" role="group" aria-label="Viewing mode">
+      <button class="mode-btn" id="readMode" type="button" aria-pressed="true" aria-label="Read mode" title="Read mode (scrolling)"><svg class="icon" aria-hidden="true"><use href="#i-read"></use></svg><span class="label">Read</span></button>
+      <button class="mode-btn" id="presentMode" type="button" aria-pressed="false" aria-label="Present mode" title="Present mode (one slide at a time)"><svg class="icon" aria-hidden="true"><use href="#i-present"></use></svg><span class="label">Present</span></button>
+    </div>
+    <button class="icon-btn" id="themeToggle" type="button" aria-label="Use light theme" title="Toggle theme (T)"><svg class="icon" aria-hidden="true"><use id="themeIcon" href="#i-sun"></use></svg></button>
+    <button class="icon-btn hide-sm" id="printButton" type="button" aria-label="Print" title="Print / save as PDF"><svg class="icon" aria-hidden="true"><use href="#i-print"></use></svg></button>
+    <button class="icon-btn" id="fullButton" type="button" aria-label="Enter full screen" title="Full screen (F)"><svg class="icon" aria-hidden="true"><use href="#i-full"></use></svg></button>
+  </div>
+</header>
+
+<nav class="chapter-nav" aria-label="Chapters">
+  <button class="chapter-link active" type="button" data-target="overview"><span class="num">00</span><span class="label">Overview</span></button>
+  <button class="chapter-link" type="button" data-target="paths"><span class="num">01</span><span class="label">Two paths</span></button>
+  <button class="chapter-link" type="button" data-target="fabric"><span class="num">02</span><span class="label">EFA vs TCP</span></button>
+  <button class="chapter-link" type="button" data-target="question"><span class="num">03</span><span class="label">The question</span></button>
+  <button class="chapter-link" type="button" data-target="arms"><span class="num">04</span><span class="label">Three arms</span></button>
+  <button class="chapter-link" type="button" data-target="result"><span class="num">05</span><span class="label">The result</span></button>
+  <button class="chapter-link" type="button" data-target="gates"><span class="num">06</span><span class="label">Proof gates</span></button>
+  <button class="chapter-link" type="button" data-target="attribution"><span class="num">07</span><span class="label">Attribution</span></button>
+  <button class="chapter-link" type="button" data-target="boundaries"><span class="num">08</span><span class="label">Boundaries</span></button>
+  <button class="chapter-link" type="button" data-target="source"><span class="num">09</span><span class="label">Source</span></button>
+  <button class="chapter-link" type="button" data-target="appendix-contract"><span class="num">A</span><span class="label">Contract</span></button>
+  <button class="chapter-link" type="button" data-target="appendix-ceiling"><span class="num">B</span><span class="label">GDS ceiling</span></button>
+  <button class="chapter-link" type="button" data-target="appendix-counters"><span class="num">C</span><span class="label">Signatures</span></button>
+  <button class="chapter-link" type="button" data-target="appendix-sources"><span class="num">D</span><span class="label">Sources</span></button>
+</nav>
+
+<div class="progress-track" aria-hidden="true"><div class="progress-bar" id="progressBar"></div></div>
+
+<main>
+<section class="chapter active" id="overview" data-index="00" aria-labelledby="t0" style="--accent:var(--orange);--accent-2:var(--ember)">
+  <p class="rail" aria-hidden="true">P5 EFA + FSx Contention Lab</p>
+  <div class="chapter-inner hero">
+    <div>
+      <div class="topics" data-reveal style="--i:0">
+        <span class="tag">EFA fabric contention</span>
+        <span class="tag ghost" style="--accent:var(--teal)">P5 + FSx for Lustre</span>
+      </div>
+      <h1 class="display" id="t0" data-reveal style="--i:1">Fast storage <span class="grad">is not free</span>.</h1>
+      <p class="hero-lede" data-reveal style="--i:2">The dedicated EFA-enabled FSx path delivered <b>11.20&times;</b> the observed read throughput of the existing TCP path. That fabric already carries NCCL &mdash; so the experiment made both use it at once, and measured which workload pays.</p>
+      <ul class="topics" data-reveal style="--i:3">
+        <li class="topic"><b>NCCL</b> over EFA / SRD</li><li class="topic"><b>GPUDirect Storage</b></li>
+        <li class="topic"><b>FSx for Lustre</b> Persistent 2</li><li class="topic"><b>2 &times; p5.48xlarge</b></li>
+      </ul>
+      <div class="presenter" data-reveal style="--i:4"><div>
+        <span class="p-name">Muru Bhaskaran</span>
+        <span class="p-role">Sr. Specialist Solutions Architect</span>
+        <span class="p-org">Amazon Web Services (AWS)</span>
+        <span class="p-team">GenAI &amp; Agentic Platform</span>
+      </div></div>
+    </div>
+    <div class="console" data-reveal style="--i:2" aria-label="Measured POSIX fio throughput on the TCP and EFA Lustre paths">
+      <div class="console-head"><span class="mono">fio / 1 worker &middot; 8 jobs &middot; 1 MiB direct &middot; QD 32</span><span class="live">measured</span></div>
+      <div class="out mono">
+        <span class="c"># existing FSx for Lustre, TCP transport</span><br>
+        WRITE&nbsp; bw=<span class="r">&nbsp;2.479 GB/s</span>&nbsp; lat_mean=<span class="r">108.230 ms</span><br>
+        READ&nbsp;&nbsp; bw=<span class="r">&nbsp;2.481 GB/s</span>&nbsp; lat_mean=<span class="r">108.139 ms</span><br>
+        <br>
+        <span class="c"># dedicated FSx for Lustre, EFA enabled</span><br>
+        WRITE&nbsp; bw=<span class="g">15.869 GB/s</span>&nbsp; lat_mean=<span class="g">&nbsp;16.914 ms</span><br>
+        READ&nbsp;&nbsp; bw=<span class="g">27.803 GB/s</span>&nbsp; lat_mean=<span class="g">&nbsp;&nbsp;9.652 ms</span>
+      </div>
+      <p class="console-foot"><svg class="icon" aria-hidden="true"><use href="#i-zap"></use></svg><span><b>6.40&times;</b> write and <b>11.20&times;</b> read on an identical job shape. The fabric that delivered that is the fabric NCCL is already using.</span></p>
+    </div>
+  </div>
+</section>
+
+<section class="chapter" id="paths" data-index="01" aria-labelledby="t1" style="--accent:var(--teal);--accent-2:var(--blue)">
+  <p class="rail" aria-hidden="true">P5 EFA + FSx Contention Lab</p>
+  <div class="chapter-inner figslide">
+    <div class="fig-head" data-reveal style="--i:0">
+      <div>
+        <p class="kicker">The collision</p>
+        <h2 class="title" id="t1">Two independent software stacks, <span class="grad">one physical fabric</span></h2>
+      </div>
+      <div class="fig-side">
+        <span class="ev ev-con"><svg class="icon" aria-hidden="true"><use href="#i-book"></use></svg>Architecture</span>
+        <span class="note">Neither stack knows<br>the other exists.</span>
+      </div>
+    </div>
+    <div data-reveal style="--i:2">
+      <button class="figbtn" type="button" data-zoom="contention" aria-label="Enlarge figure: NCCL collectives and GPUDirect Storage checkpoint writes converging on the same EFA fabric across two P5 workers and an EFA-enabled FSx for Lustre filesystem.">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1320" preserveAspectRatio="xMidYMid meet" class="dgm-svg" role="img" aria-label="NCCL collectives and GPUDirect Storage checkpoint writes converging on the same EFA fabric across two P5 workers and an EFA-enabled FSx for Lustre filesystem.">
+          <defs>
+            <filter id="ctn-softShadow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#14213d" flood-opacity="0.12"/>
+            </filter>
+            <marker id="ctn-arrowEnd" markerWidth="12" markerHeight="10" refX="10" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M0,0 L0,8 L11,4 z" fill="context-stroke"/>
+            </marker>
+            <marker id="ctn-arrowStart" markerWidth="12" markerHeight="10" refX="1" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+              <path d="M11,0 L11,8 L0,4 z" fill="context-stroke"/>
+            </marker>
+            <style>text { letter-spacing: 0; }</style>
+          </defs>
+          <rect width="1800" height="1320" fill="#fbfcfe"/>
+
+          <text x="900" y="55" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="39" font-weight="800" fill="#14213d">NCCL collectives and GPUD checkpoint writes share the EFA fabric</text>
+          <text x="900" y="91" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="19" font-weight="700" fill="#53627a">One controlled 90-second run per arm on the same two-node Spot P5 allocation</text>
+          <rect x="1515" y="82" width="230" height="34" rx="17" fill="#edf9f1" stroke="#149447" stroke-width="2"/>
+          <text x="1630" y="105" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="13" font-weight="800" fill="#149447">PATHS VALIDATED</text>
+
+          <rect x="55" y="125" width="330" height="91" rx="11" fill="#ffffff" stroke="#6748d6" stroke-width="2.5" filter="url(#ctn-softShadow)"/><circle cx="84" cy="153" r="17" fill="#6748d6"/><text x="84" y="159" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="800" fill="#ffffff">A</text><text x="109" y="155" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">NCCL only</text><text x="73" y="185" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="12" font-weight="700" fill="#53627a"><tspan x="73" dy="0">16 ranks</tspan><tspan x="73" dy="17">256 MiB/rank</tspan></text>
+          <line x1="393" y1="171" x2="477" y2="171" stroke="#6748d6" stroke-width="4" marker-end="url(#ctn-arrowEnd)"/>
+          <rect x="487" y="125" width="350" height="91" rx="11" fill="#ffffff" stroke="#f1a208" stroke-width="2.5" filter="url(#ctn-softShadow)"/><circle cx="516" cy="153" r="17" fill="#f1a208"/><text x="516" y="159" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="800" fill="#ffffff">B</text><text x="541" y="155" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">Checkpoint only</text><text x="505" y="185" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="12" font-weight="700" fill="#53627a"><tspan x="505" dy="0">2 GPUD writers</tspan><tspan x="505" dy="17">one per node</tspan></text>
+          <line x1="845" y1="171" x2="929" y2="171" stroke="#f1a208" stroke-width="4" marker-end="url(#ctn-arrowEnd)"/>
+          <rect x="939" y="125" width="390" height="91" rx="11" fill="#ffffff" stroke="#d83742" stroke-width="2.5" filter="url(#ctn-softShadow)"/><circle cx="968" cy="153" r="17" fill="#d83742"/><text x="968" y="159" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="800" fill="#ffffff">C</text><text x="993" y="155" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">Synchronized overlap</text><text x="957" y="185" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="12" font-weight="700" fill="#53627a"><tspan x="957" dy="0">same parameters</tspan><tspan x="957" dy="17">shared start epoch</tspan></text>
+          <rect x="1365" y="125" width="380" height="91" rx="11" fill="#edf2ff" stroke="#3767e8" stroke-width="2.5" filter="url(#ctn-softShadow)"/>
+          <text x="1555" y="156" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="18" font-weight="800" fill="#3767e8">Experiment boundary</text>
+          <text x="1555" y="181" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="13" font-weight="700" fill="#14213d"><tspan x="1555" dy="0">Synthetic data-plane benchmark</tspan><tspan x="1555" dy="18">not a full checkpoint serializer</tspan></text>
+
+          <rect x="50" y="265" width="750" height="405" rx="16" fill="#edf2ff" stroke="#3767e8" stroke-width="3" filter="url(#ctn-softShadow)"/>
+          <text x="78" y="307" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="29" font-weight="800" fill="#3767e8">P5 worker A</text>
+          <text x="770" y="307" text-anchor="end" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">8 H100 | 32 EFA</text>
+          <rect x="80" y="340" width="330" height="142" rx="12" fill="#ffffff" stroke="#6748d6" stroke-width="2.5" filter="url(#ctn-softShadow)"/><text x="98" y="371" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#6748d6">Distributed trainer</text><text x="98" y="399" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="650" fill="#14213d"><tspan x="98" dy="0">Ranks 0-7</tspan><tspan x="98" dy="21">NCCL all-reduce</tspan><tspan x="98" dy="21">NVSwitch inside node</tspan></text>
+          <rect x="440" y="340" width="330" height="142" rx="12" fill="#ffffff" stroke="#f1a208" stroke-width="2.5" filter="url(#ctn-softShadow)"/><text x="458" y="371" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#f1a208">Checkpoint writer</text><text x="458" y="399" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="650" fill="#14213d"><tspan x="458" dy="0">GPU 0 | 4 threads</tspan><tspan x="458" dy="21">cuFile + nvidia_fs</tspan><tspan x="458" dy="21">XferType: GPUD</tspan></text>
+          <rect x="80" y="510" width="690" height="116" rx="11" fill="#ffffff" stroke="#13a9c6" stroke-width="2"/>
+          <text x="425" y="541" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#13a9c6">EFA device layer</text>
+          <text x="425" y="574" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">aws-ofi-nccl + libfabric | Lustre + kefalnd</text>
+          <text x="425" y="603" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="700" fill="#53627a">32 local EFA devices; zero errors or drops</text>
+
+          <rect x="1000" y="265" width="750" height="405" rx="16" fill="#eafafd" stroke="#13a9c6" stroke-width="3" filter="url(#ctn-softShadow)"/>
+          <text x="1028" y="307" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="29" font-weight="800" fill="#13a9c6">P5 worker B</text>
+          <text x="1720" y="307" text-anchor="end" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">8 H100 | 32 EFA</text>
+          <rect x="1030" y="340" width="330" height="142" rx="12" fill="#ffffff" stroke="#6748d6" stroke-width="2.5" filter="url(#ctn-softShadow)"/><text x="1048" y="371" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#6748d6">Distributed trainer</text><text x="1048" y="399" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="650" fill="#14213d"><tspan x="1048" dy="0">Ranks 8-15</tspan><tspan x="1048" dy="21">NCCL all-reduce</tspan><tspan x="1048" dy="21">NVSwitch inside node</tspan></text>
+          <rect x="1390" y="340" width="330" height="142" rx="12" fill="#ffffff" stroke="#f1a208" stroke-width="2.5" filter="url(#ctn-softShadow)"/><text x="1408" y="371" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#f1a208">Checkpoint writer</text><text x="1408" y="399" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="650" fill="#14213d"><tspan x="1408" dy="0">GPU 0 | 4 threads</tspan><tspan x="1408" dy="21">cuFile + nvidia_fs</tspan><tspan x="1408" dy="21">XferType: GPUD</tspan></text>
+          <rect x="1030" y="510" width="690" height="116" rx="11" fill="#ffffff" stroke="#13a9c6" stroke-width="2"/>
+          <text x="1375" y="541" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#13a9c6">EFA device layer</text>
+          <text x="1375" y="574" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">aws-ofi-nccl + libfabric | Lustre + kefalnd</text>
+          <text x="1375" y="603" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="700" fill="#53627a">32 local EFA devices; zero errors or drops</text>
+
+          <line x1="808" y1="401" x2="992" y2="401" stroke="#6748d6" stroke-width="8" marker-start="url(#ctn-arrowStart)" marker-end="url(#ctn-arrowEnd)"/>
+          <text x="900" y="350" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="15" font-weight="800" fill="#6748d6"><tspan x="900" dy="0">NCCL collective</tspan><tspan x="900" dy="22">EFA / SRD</tspan><tspan x="900" dy="22">GPUDirect RDMA</tspan></text>
+
+          <line x1="536" y1="633" x2="741" y2="748" stroke="#f1a208" stroke-width="6" marker-end="url(#ctn-arrowEnd)"/>
+          <line x1="1264" y1="633" x2="1059" y2="748" stroke="#f1a208" stroke-width="6" marker-end="url(#ctn-arrowEnd)"/>
+          <rect x="610" y="720" width="580" height="138" rx="15" fill="#fff8df" stroke="#f1a208" stroke-width="3" filter="url(#ctn-softShadow)"/>
+          <text x="900" y="758" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="25" font-weight="800" fill="#f1a208">EFA-enabled FSx for Lustre</text>
+          <text x="900" y="791" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">Persistent 2 SSD | Lustre 2.15 | 19,200 GiB</text>
+          <text x="900" y="824" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="15" font-weight="700" fill="#53627a">Logical write path: H100 VRAM -&gt; cuFile -&gt; EFA -&gt; shared filesystem</text>
+
+          <rect x="50" y="895" width="1090" height="276" rx="15" fill="#ffffff" stroke="#7a8baa" stroke-width="2.5" filter="url(#ctn-softShadow)"/>
+          <text x="78" y="935" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="27" font-weight="800" fill="#14213d">Measured result</text>
+          <text x="405" y="979" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="800" fill="#53627a">ISOLATED</text>
+          <text x="630" y="979" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="800" fill="#53627a">OVERLAP</text>
+          <text x="855" y="979" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="800" fill="#53627a">CHANGE</text>
+          <line x1="78" y1="991" x2="1110" y2="991" stroke="#dce3ef" stroke-width="2"/>
+          <text x="82" y="1027" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">NCCL payload</text>
+          <text x="405" y="1027" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">166.570 GB/s</text>
+          <text x="630" y="1027" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">163.455 GB/s</text>
+          <text x="855" y="1027" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="18" font-weight="800" fill="#149447">-1.87%</text>
+          <text x="82" y="1075" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">GPUD write</text>
+          <text x="405" y="1075" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">6.625 GiB/s</text>
+          <text x="630" y="1075" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">5.660 GiB/s</text>
+          <text x="855" y="1075" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="18" font-weight="800" fill="#d83742">-14.57%</text>
+          <text x="82" y="1123" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">GPUD mean latency</text>
+          <text x="405" y="1123" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">1.180 ms</text>
+          <text x="630" y="1123" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">1.381 ms</text>
+          <text x="855" y="1123" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="18" font-weight="800" fill="#d83742">+17.02%</text>
+          <rect x="928" y="1005" width="184" height="129" rx="10" fill="#edf9f1" stroke="#149447" stroke-width="2"/>
+          <text x="1020" y="1037" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="800" fill="#149447">PASS GATES</text>
+          <text x="1020" y="1065" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="12" font-weight="750" fill="#14213d"><tspan x="1020" dy="0">16/16 ranks</tspan><tspan x="1020" dy="18">GPUD both nodes</tspan><tspan x="1020" dy="18">no socket fallback</tspan><tspan x="1020" dy="18">zero errors/drops</tspan></text>
+
+          <rect x="1170" y="895" width="580" height="276" rx="15" fill="#f4f0ff" stroke="#6748d6" stroke-width="2.5" filter="url(#ctn-softShadow)"/>
+          <text x="1198" y="935" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="27" font-weight="800" fill="#6748d6">Counter signatures</text>
+          <text x="1200" y="983" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="800" fill="#6748d6">NCCL only</text>
+          <text x="1340" y="983" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="15" font-weight="700" fill="#14213d">rdma_write_bytes dominated</text>
+          <text x="1200" y="1023" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="800" fill="#f1a208">GPUD only</text>
+          <text x="1340" y="1023" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="15" font-weight="700" fill="#14213d">rdma_read_resp_bytes dominated</text>
+          <text x="1200" y="1063" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="800" fill="#d83742">Overlap</text>
+          <text x="1340" y="1063" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="15" font-weight="700" fill="#14213d">both signatures appeared</text>
+          <rect x="1195" y="1092" width="530" height="54" rx="8" fill="#ffffff" stroke="#6748d6" stroke-width="2"/>
+          <text x="1460" y="1114" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="12" font-weight="750" fill="#53627a"><tspan x="1460" dy="0">NIC counters are aggregate evidence,</tspan><tspan x="1460" dy="17">not universal per-process attribution</tspan></text>
+
+          <rect x="50" y="1208" width="1700" height="76" rx="12" fill="#14213d" stroke="#14213d" stroke-width="2"/>
+          <text x="78" y="1241" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="15" font-weight="800" fill="#f1a208">TAKEAWAY</text>
+          <text x="214" y="1241" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="700" fill="#ffffff">Storage absorbed more contention in this run: async checkpointing still needs rate limits, staggering, and real-workload validation.</text>
+          <text x="78" y="1269" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="15" font-weight="800" fill="#13a9c6">BOUNDARY</text>
+          <text x="214" y="1269" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="700" fill="#ffffff">One synthetic run per arm; retain the topology and repeat before turning the delta into a production SLO.</text>
+        </svg>
+      </button>
+      <p class="fig-cap"><span>Validated topology, 2026-08-27 UTC &middot; two Spot <span class="mono">p5.48xlarge</span> workers, 32 EFA devices each, one dedicated EFA-enabled filesystem</span>
+        <span class="zoomhint"><svg class="icon" aria-hidden="true"><use href="#i-zoom"></use></svg>Click to enlarge</span></p>
+    </div>
+    <div class="stacks" data-reveal style="--i:3">
+      <div class="stack" style="--accent:var(--c-nccl)">
+        <div class="stack-h">
+          <span class="glyph"><svg class="icon" aria-hidden="true"><use href="#i-net"></use></svg></span>
+          <div><b>Gradients</b><span>Collective communication</span></div>
+        </div>
+        <div class="hops">
+          <span class="hop">PyTorch</span><span class="arrow">&rarr;</span>
+          <span class="hop">NCCL</span><span class="arrow">&rarr;</span>
+          <span class="hop">aws-ofi-nccl</span><span class="arrow">&rarr;</span>
+          <span class="hop">libfabric</span><span class="arrow">&rarr;</span>
+          <span class="hop last">EFA / SRD</span>
+        </div>
+      </div>
+      <div class="stack" style="--accent:var(--c-ckpt)">
+        <div class="stack-h">
+          <span class="glyph"><svg class="icon" aria-hidden="true"><use href="#i-db"></use></svg></span>
+          <div><b>Checkpoint bytes</b><span>GPU-direct storage I/O</span></div>
+        </div>
+        <div class="hops">
+          <span class="hop">GPU</span><span class="arrow">&rarr;</span>
+          <span class="hop">cuFile / nvidia_fs</span><span class="arrow">&rarr;</span>
+          <span class="hop">Lustre / kefalnd</span><span class="arrow">&rarr;</span>
+          <span class="hop last">EFA / SRD</span><span class="arrow">&rarr;</span>
+          <span class="hop">FSx</span>
+        </div>
+      </div>
+    </div>
+    <p class="note" data-reveal style="--i:4">Different vocabularies, different tuning knobs, often different owners &mdash; and <b style="color:var(--text)">the same NICs</b>. A shared transport is where the two stacks meet whether or not anyone planned it.</p>
+  </div>
+</section>
+
+<section class="chapter" id="fabric" data-index="02" aria-labelledby="t2" style="--accent:var(--teal);--accent-2:var(--green)">
+  <p class="rail" aria-hidden="true">P5 EFA + FSx Contention Lab</p>
+  <div class="chapter-inner">
+    <p class="kicker" data-reveal style="--i:0">Why the fabric matters</p>
+    <h2 class="title" id="t2" data-reveal style="--i:1">The EFA-enabled Lustre path outran the TCP path <span class="grad">by an order of magnitude</span></h2>
+    <p class="lede" data-reveal style="--i:2">One POSIX control, run on one worker against both filesystems: eight <span class="mono">fio</span> jobs, 1 MiB blocks, direct I/O, queue depth 32 per job, 16 GiB per job, 90 seconds per phase.
+      <span class="ev ev-mea" style="margin-left:calc(var(--u)*6)"><svg class="icon" aria-hidden="true"><use href="#i-gauge"></use></svg>Measured once per phase</span></p>
+    <div class="charts" style="margin-top:calc(var(--u)*20)">
+      <div class="chart" data-reveal style="--i:3">
+        <div class="chart-h"><b>Client throughput</b><span>higher is better &middot; GB/s</span></div>
+        <div class="bars">
+          <div class="bar-row"><span class="cat mono">TCP &middot; write</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:8.3%;--bc:var(--c-tcp)"></div></div>
+            <span class="val">2.479<s> GB/s</s></span></div>
+          <div class="bar-row"><span class="cat mono">TCP &middot; read</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:8.3%;--bc:var(--c-tcp)"></div></div>
+            <span class="val">2.481<s> GB/s</s></span></div>
+          <div class="bar-row"><span class="cat mono">EFA &middot; write</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:52.9%;--bc:var(--c-efa)"></div></div>
+            <span class="val">15.869<s> GB/s</s></span></div>
+          <div class="bar-row"><span class="cat mono">EFA &middot; read</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:92.7%;--bc:var(--c-efa)"></div></div>
+            <span class="val">27.803<s> GB/s</s></span></div>
+        </div>
+        <div class="axis"><span>0</span><span>15</span><span>30 GB/s</span></div>
+      </div>
+      <div class="chart" data-reveal style="--i:4">
+        <div class="chart-h"><b>Mean operation latency</b><span>lower is better &middot; milliseconds</span></div>
+        <div class="bars">
+          <div class="bar-row"><span class="cat mono">TCP &middot; write</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:90.2%;--bc:var(--c-tcp)"></div></div>
+            <span class="val">108.230<s> ms</s></span></div>
+          <div class="bar-row"><span class="cat mono">TCP &middot; read</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:90.1%;--bc:var(--c-tcp)"></div></div>
+            <span class="val">108.139<s> ms</s></span></div>
+          <div class="bar-row"><span class="cat mono">EFA &middot; write</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:14.1%;--bc:var(--c-efa)"></div></div>
+            <span class="val">16.914<s> ms</s></span></div>
+          <div class="bar-row"><span class="cat mono">EFA &middot; read</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:8%;--bc:var(--c-efa)"></div></div>
+            <span class="val">9.652<s> ms</s></span></div>
+        </div>
+        <div class="axis"><span>0</span><span>60</span><span>120 ms</span></div>
+      </div>
+    </div>
+    <div class="legend" data-reveal style="--i:5;margin-top:calc(var(--u)*14)">
+      <i style="--bc:var(--c-tcp)">Existing FSx for Lustre, TCP transport</i>
+      <i style="--bc:var(--c-efa)">Dedicated FSx for Lustre Persistent 2, EFA enabled</i>
+    </div>
+    <div class="deltas" data-reveal style="--i:6;margin-top:calc(var(--u)*16)">
+      <div class="delta" style="--dc:var(--c-efa)"><span class="dk">Write throughput</span><span class="dv">6.40&times;</span><span class="dn">2.479 &rarr; 15.869 GB/s</span></div>
+      <div class="delta" style="--dc:var(--c-efa)"><span class="dk">Read throughput</span><span class="dv">11.20&times;</span><span class="dn">2.481 &rarr; 27.803 GB/s</span></div>
+      <div class="delta" style="--dc:var(--green)"><span class="dk">Write latency</span><span class="dv">-84.4%</span><span class="dn">108.230 &rarr; 16.914 ms</span></div>
+      <div class="delta" style="--dc:var(--green)"><span class="dk">Read latency</span><span class="dv">-91.1%</span><span class="dn">108.139 &rarr; 9.652 ms</span></div>
+    </div>
+    <p class="callout" data-reveal style="--i:7;margin-top:calc(var(--u)*14)"><b>Read this as a path comparison, not a transport benchmark.</b> The two filesystems differ in more than transport &mdash; capacity and throughput tier included &mdash; so this does not isolate EFA as the cause. The immediate read phase may also include FSx server-side cache effects, and these are tool-observed client numbers, not durable-media guarantees.</p>
+  </div>
+</section>
+
+<section class="chapter" id="question" data-index="03" aria-labelledby="t3" style="--accent:var(--blue);--accent-2:var(--purple)">
+  <p class="rail" aria-hidden="true">P5 EFA + FSx Contention Lab</p>
+  <div class="chapter-inner">
+    <p class="kicker" data-reveal style="--i:0">The narrow question</p>
+    <h2 class="title" id="t3" data-reveal style="--i:1">When both paths run together, <span class="grad">which one absorbs it?</span></h2>
+    <p class="lede" data-reveal style="--i:2">A distributed trainer can be reducing gradients while an asynchronous checkpoint writer drains tensors to shared storage. Asynchronous checkpointing can <em>reduce</em> trainer blocking, but the bytes still cross the same NICs. So: hold the fleet, the filesystem, the duration and the payloads constant, and change only whether the two workloads overlap.</p>
+    <div class="grid-2" style="margin-top:calc(var(--u)*20);gap:calc(var(--u)*24);align-items:start">
+      <div>
+        <table class="dtable" data-reveal style="--i:3">
+          <thead><tr><th>Held constant</th><th>Validated value</th></tr></thead>
+          <tbody>
+            <tr style="--rc:var(--c-p5,var(--orange))"><td>Compute</td><td>2 &times; Spot <b class="mono">p5.48xlarge</b>, one exclusive Slurm allocation</td></tr>
+            <tr style="--rc:var(--green)"><td>GPUs</td><td>8 &times; H100 80 GiB per worker &middot; <b>16 total</b></td></tr>
+            <tr style="--rc:var(--purple)"><td>EFA</td><td><b>32 devices</b> per worker</td></tr>
+            <tr style="--rc:var(--purple)"><td>NCCL world</td><td><b>16 ranks</b>, 8 per worker &middot; 256 MiB float tensor per rank</td></tr>
+            <tr style="--rc:var(--teal)"><td>Filesystem</td><td>Dedicated EFA-enabled Lustre Persistent 2 SSD at <b class="mono">/fsx-efa</b></td></tr>
+            <tr style="--rc:var(--teal)"><td>Capacity</td><td>19,200 GiB at 1,000 MB/s/TiB</td></tr>
+            <tr style="--rc:var(--blue)"><td>Arm duration</td><td><b>90 seconds</b>, both workloads</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:calc(var(--u)*12)">
+        <p class="banner" data-reveal style="--accent:var(--teal);--i:4"><svg class="icon" aria-hidden="true"><use href="#i-shield"></use></svg>
+          <span>The dedicated filesystem is <b>separate</b> from the shared <span class="mono">/fsx</span> mount, so the experiment never touches production model or training data.</span></p>
+        <p class="banner" data-reveal style="--accent:var(--blue);--i:5"><svg class="icon" aria-hidden="true"><use href="#i-clock"></use></svg>
+          <span>Both workloads start from <b>one shared future UTC epoch</b>. Overlap is engineered, not hoped for &mdash; the arms would otherwise measure two staggered workloads.</span></p>
+        <p class="callout hard" data-reveal style="--i:6"><b>What this is not.</b> The writer is a checkpoint-<em>like</em> data-plane workload. It has no PyTorch serialization, no optimizer-state assembly, and no Distributed Checkpoint metadata. It reproduces the byte movement, not the full checkpoint stack.</p>
+        <p class="note" data-reveal style="--i:7"><b style="color:var(--yellow)">Spot caveat, stated by the lab:</b> a Spot interruption invalidates an arm. The partial evidence is preserved, the measurement is discarded, and the arm is rerun under a new label.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="chapter" id="arms" data-index="04" aria-labelledby="t4" style="--accent:var(--purple);--accent-2:var(--blue)">
+  <p class="rail" aria-hidden="true">P5 EFA + FSx Contention Lab</p>
+  <div class="chapter-inner">
+    <p class="kicker" data-reveal style="--i:0">Controlled method</p>
+    <h2 class="title" id="t4" data-reveal style="--i:1">Three matched arms on <span class="grad">one exclusive allocation</span></h2>
+    <p class="lede" data-reveal style="--i:2">The two isolated arms establish each workload's baseline and its EFA counter signature. The overlap arm changes exactly one thing: concurrent execution.</p>
+    <p class="tl" data-reveal style="--i:3;margin-top:calc(var(--u)*18)"><span>t = 0</span><span>90-second arm</span><span>t = 90 s</span></p>
+    <div class="arms">
+      <div class="arm" data-reveal style="--ac:var(--c-nccl);--i:4">
+        <div class="arm-id"><b>Arm A</b><span>NCCL only</span>
+          <span class="tag ghost" style="--accent:var(--c-nccl)"><svg class="icon" aria-hidden="true"><use href="#i-net"></use></svg>Baseline</span></div>
+        <div class="lanes">
+          <div class="lane lane-live" style="--lc:var(--c-nccl)"><i>Collectives</i>
+            <div class="lane-track"><span class="lane-on" style="--lc:var(--c-nccl)"><b>16-rank validated all-reduce &middot; 55,855 iterations</b></span></div></div>
+          <div class="lane"><i>Storage</i><div class="lane-track"><span class="lane-off">idle</span></div></div>
+        </div>
+        <div class="arm-fabric" data-state="single" style="--fc:var(--c-nccl)" title="EFA carrying the collective path alone: rdma_write_bytes dominated, about 30 TB over the window">
+          <span class="fab-bar" aria-hidden="true"><span class="fab-flow full" style="--pc:var(--c-nccl)"></span></span><i>1 path</i></div>
+        <div class="arm-res"><b>166.570 GB/s</b><i>algorithmic payload</i><b>16 / 16</b><i>correct ranks</i></div>
+      </div>
+      <div class="arm" data-reveal style="--ac:var(--c-ckpt);--i:5">
+        <div class="arm-id"><b>Arm B</b><span>Checkpoint only</span>
+          <span class="tag ghost" style="--accent:var(--c-ckpt)"><svg class="icon" aria-hidden="true"><use href="#i-db"></use></svg>Baseline</span></div>
+        <div class="lanes">
+          <div class="lane"><i>Collectives</i><div class="lane-track"><span class="lane-off">idle</span></div></div>
+          <div class="lane lane-live" style="--lc:var(--c-ckpt)"><i>Storage</i>
+            <div class="lane-track"><span class="lane-on" style="--lc:var(--c-ckpt)"><b>1 GPUD writer per worker &middot; 4 threads &middot; 16 GiB each</b></span></div></div>
+        </div>
+        <div class="arm-fabric" data-state="single" style="--fc:var(--c-ckpt)" title="EFA carrying the storage path alone: rdma_read_resp_bytes dominated, about 639 GB over the window">
+          <span class="fab-bar" aria-hidden="true"><span class="fab-flow full" style="--pc:var(--c-ckpt)"></span></span><i>1 path</i></div>
+        <div class="arm-res"><b>6.625 GiB/s</b><i>aggregate write</i><b>1.180 ms</b><i>mean latency</i></div>
+      </div>
+      <div class="arm contended" data-reveal style="--ac:var(--orange);--i:6">
+        <div class="arm-id"><b>Arm C</b><span>Synchronized overlap</span>
+          <span class="tag ghost" style="--accent:var(--orange)"><svg class="icon" aria-hidden="true"><use href="#i-clock"></use></svg>Shared epoch</span></div>
+        <div class="lanes">
+          <div class="lane lane-live" style="--lc:var(--c-nccl)"><i>Collectives</i>
+            <div class="lane-track"><span class="lane-on" style="--lc:var(--c-nccl)"><b>same parameters as Arm A</b></span></div></div>
+          <div class="lane lane-live" style="--lc:var(--c-ckpt)"><i>Storage</i>
+            <div class="lane-track"><span class="lane-on" style="--lc:var(--c-ckpt)"><b>same parameters as Arm B</b></span></div></div>
+        </div>
+        <div class="arm-fabric" data-state="contended" style="--fc:var(--red)" title="Both paths on the same NICs: both counter signatures present in one window">
+          <span class="fab-bar" aria-hidden="true"><span class="fab-flow half-a" style="--pc:var(--c-nccl)"></span><span class="fab-flow half-b" style="--pc:var(--c-ckpt)"></span></span><i>2 paths</i></div>
+        <div class="arm-res"><b>163.455 GB/s</b><em style="--rc:var(--yellow)">-1.87%</em><b>5.660 GiB/s</b><em style="--rc:var(--red)">-14.57%</em></div>
+      </div>
+    </div>
+    <div class="grid-2" data-reveal style="--i:7;margin-top:calc(var(--u)*16);align-items:center">
+      <p class="banner" style="--accent:var(--purple)"><svg class="icon" aria-hidden="true"><use href="#i-scale"></use></svg>
+        <span>Same workers, same filesystem, same duration, same payloads. <b>The only intended change is concurrency.</b></span></p>
+      <div style="display:flex;justify-content:flex-end">
+        <a class="btn primary" href="p5-efa-fsx-contention-animation.html"><svg class="icon" aria-hidden="true"><use href="#i-play"></use></svg>Walk the five phases, animated</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="chapter" id="result" data-index="05" aria-labelledby="t5" style="--accent:var(--orange);--accent-2:var(--red)">
+  <p class="rail" aria-hidden="true">P5 EFA + FSx Contention Lab</p>
+  <div class="chapter-inner">
+    <p class="kicker" data-reveal style="--i:0">The result</p>
+    <h2 class="title" id="t5" data-reveal style="--i:1">The collective barely noticed. <span class="grad">Storage paid the bill.</span></h2>
+    <p class="lede" data-reveal style="--i:2">Every bar is normalized to its own isolated baseline, so the three metrics are directly comparable. Absolute values are in the tiles.
+      <span class="ev ev-mea" style="margin-left:calc(var(--u)*6)"><svg class="icon" aria-hidden="true"><use href="#i-gauge"></use></svg>One 90 s run per arm</span></p>
+    <div class="grid-2" style="margin-top:calc(var(--u)*18);gap:calc(var(--u)*26);align-items:center">
+      <div class="chart" data-reveal style="--i:3">
+        <div class="chart-h"><b>Overlap relative to isolated baseline</b><span>baseline = 100%</span></div>
+        <div class="gchart">
+          <div class="yaxis"><span>120</span><span>100</span><span>80</span><span>60</span><span>40</span><span>20</span><span>0</span></div>
+          <div class="plot">
+            <div class="ref" aria-hidden="true"></div>
+            <div class="pair"><div class="vbar" style="--h:83.3%;--bc:var(--c-iso)"><span class="vl">100</span></div><div class="vbar" style="--h:81.8%;--bc:var(--c-ovl)"><span class="vl">98.1</span></div></div>
+            <div class="pair"><div class="vbar" style="--h:83.3%;--bc:var(--c-iso)"><span class="vl">100</span></div><div class="vbar" style="--h:71.2%;--bc:var(--c-ovl)"><span class="vl">85.4</span></div></div>
+            <div class="pair"><div class="vbar" style="--h:83.3%;--bc:var(--c-iso)"><span class="vl">100</span></div><div class="vbar tall" style="--h:97.5%;--bc:var(--c-ovl)"><span class="vl">117.0</span></div></div>
+          </div>
+        </div>
+        <div class="xaxis">
+          <span>NCCL payload<i>higher is better</i></span>
+          <span>Checkpoint write<i>higher is better</i></span>
+          <span>Checkpoint latency<i>lower is better</i></span>
+        </div>
+        <div class="legend" style="margin-top:calc(var(--u)*8)">
+          <i style="--bc:var(--c-iso)">Isolated (Arm A / Arm B)</i><i style="--bc:var(--c-ovl)">Synchronized overlap (Arm C)</i>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:calc(var(--u)*11)">
+        <div class="deltas" style="grid-template-columns:1fr 1fr">
+          <div class="delta" data-reveal style="--dc:var(--yellow);--i:4"><span class="dk">NCCL payload</span><span class="dv">-1.87%</span><span class="dn">166.570 &rarr; 163.455 GB/s</span></div>
+          <div class="delta" data-reveal style="--dc:var(--yellow);--i:5"><span class="dk">NCCL bus bandwidth</span><span class="dv">-1.87%</span><span class="dn">312.319 &rarr; 306.478 GB/s, estimated</span></div>
+          <div class="delta" data-reveal style="--dc:var(--red);--i:6"><span class="dk">Checkpoint write</span><span class="dv">-14.57%</span><span class="dn">6.625 &rarr; 5.660 GiB/s</span></div>
+          <div class="delta" data-reveal style="--dc:var(--red);--i:7"><span class="dk">Checkpoint latency</span><span class="dv">+17.02%</span><span class="dn">1.180 &rarr; 1.381 ms &middot; positive is a regression</span></div>
+        </div>
+        <p class="banner" data-reveal style="--accent:var(--orange);--i:8"><svg class="icon" aria-hidden="true"><use href="#i-gauge"></use></svg>
+          <span>NCCL iteration count moved in line with its bandwidth: <b>55,855 &rarr; 54,810</b> all-reduces, 620.5 &rarr; 608.9 per second. All <b>16 / 16</b> ranks completed without a reported stall.</span></p>
+        <p class="callout" data-reveal style="--i:9"><b>Both directions of the asymmetry are useful.</b> Roughly <b>8&times;</b> more relative impact landed on storage than on the collective. That argues for staggering or rate-limiting checkpoint writes away from communication-heavy phases &mdash; and it argues against assuming an asynchronous checkpoint is free because the trainer never blocked.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="chapter" id="gates" data-index="06" aria-labelledby="t6" style="--accent:var(--green);--accent-2:var(--teal)">
+  <p class="rail" aria-hidden="true">P5 EFA + FSx Contention Lab</p>
+  <div class="chapter-inner">
+    <p class="kicker" data-reveal style="--i:0">Verification</p>
+    <h2 class="title" id="t6" data-reveal style="--i:1">Every arm was <span class="grad">fail-closed</span>, including the negative assertions</h2>
+    <p class="lede" data-reveal style="--i:2">A degraded fallback path would have produced a plausible-looking number. Each arm therefore asserts the exact data path it claims &mdash; and asserts the absence of the fallbacks &mdash; before its measurement is accepted.</p>
+    <div class="grid-2" style="margin-top:calc(var(--u)*18);gap:calc(var(--u)*24);align-items:start">
+      <div class="out mono" data-reveal style="--i:3">
+        <span class="c"># NCCL transport, both isolated and overlap arms</span><br>
+        NCCL INFO&nbsp; Using network <span class="g">AWS Libfabric</span><br>
+        NCCL INFO&nbsp; channels via <span class="g">NET/AWS Libfabric/&lt;rail&gt;/GDRDMA</span><br>
+        validated all-reduce ranks <span class="g">16/16</span>&nbsp; tensor value <span class="g">1.0</span><br>
+        <span class="r">0</span> records matching <span class="r">NET/Socket</span><br>
+        <br>
+        <span class="c"># GPUDirect Storage writer, compatibility mode refused</span><br>
+        cufile.json&nbsp; <span class="k">allow_compat_mode</span> = <span class="g">false</span><br>
+        env&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class="k">CUFILE_FORCE_COMPAT_MODE</span> = <span class="g">false</span><br>
+        gdsio&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class="k">XferType</span>: <span class="g">GPUD</span>&nbsp; <span class="c">// accept only this</span><br>
+        <br>
+        <span class="c"># host and fabric counters after each window</span><br>
+        nvidia_fs&nbsp; read_errors=<span class="g">0</span> write_errors=<span class="g">0</span><br>
+        efa&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; rdma_write_err=<span class="g">0</span> rx_drops=<span class="g">0</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:calc(var(--u)*10)">
+        <ul class="strip" data-reveal style="--i:4">
+          <li class="strip-item" style="--sc:var(--green)"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg><span><b>NCCL correctness</b> &middot; 16/16 ranks, validated tensor value 1.0</span></li>
+          <li class="strip-item" style="--sc:var(--green)"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg><span><b>NCCL transport</b> &middot; <span class="mono">NET/AWS Libfabric/&hellip;/GDRDMA</span></span></li>
+          <li class="strip-item" style="--sc:var(--red)"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg><span><b>Negative:</b> zero socket-fallback records</span></li>
+          <li class="strip-item" style="--sc:var(--green)"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg><span><b>GDS mode</b> &middot; <span class="mono">GPUD</span> only</span></li>
+          <li class="strip-item" style="--sc:var(--red)"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg><span><b>Negative:</b> cuFile compatibility fallback disabled</span></li>
+          <li class="strip-item" style="--sc:var(--green)"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg><span><b><span class="mono">nvidia_fs</span></b> &middot; zero read and write errors</span></li>
+          <li class="strip-item" style="--sc:var(--green)"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg><span><b>EFA</b> &middot; zero RDMA write errors, zero receive drops</span></li>
+          <li class="strip-item" style="--sc:var(--green)"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg><span><b>Slurm placement</b> &middot; exactly two workers, one exclusive allocation</span></li>
+        </ul>
+        <p class="banner" data-reveal style="--accent:var(--green);--i:5"><svg class="icon" aria-hidden="true"><use href="#i-shield"></use></svg>
+          <span><b>Application metrics are authoritative for performance.</b> Host and fabric counters are there to prove the intended path ran, error-free, inside the exact measurement window.</span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="chapter" id="attribution" data-index="07" aria-labelledby="t7" style="--accent:var(--yellow);--accent-2:var(--orange)">
+  <p class="rail" aria-hidden="true">P5 EFA + FSx Contention Lab</p>
+  <div class="chapter-inner figslide">
+    <div class="fig-head" data-reveal style="--i:0">
+      <div>
+        <p class="kicker">Measurement and attribution</p>
+        <h2 class="title" id="t7">NIC counters correlate. <span class="grad">They do not attribute.</span></h2>
+      </div>
+      <div class="fig-side">
+        <span class="ev ev-obs"><svg class="icon" aria-hidden="true"><use href="#i-eye"></use></svg>Observed signatures</span>
+        <span class="note">Cumulative per NIC and port,<br>delta-sampled per window.</span>
+      </div>
+    </div>
+    <div data-reveal style="--i:2">
+      <button class="figbtn" type="button" data-zoom="attribution" aria-label="Enlarge figure: how application metrics, nvidia_fs counters and EFA hardware counters are sampled and correlated per measurement window, and what each source can and cannot prove.">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1320" preserveAspectRatio="xMidYMid meet" class="dgm-svg" role="img" aria-label="How application metrics, nvidia_fs counters and EFA hardware counters are sampled and correlated per measurement window, and what each source can and cannot prove.">
+          <defs>
+            <filter id="att-softShadow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#14213d" flood-opacity="0.12"/>
+            </filter>
+            <marker id="att-arrowEnd" markerWidth="12" markerHeight="10" refX="10" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M0,0 L0,8 L11,4 z" fill="context-stroke"/>
+            </marker>
+            <marker id="att-arrowStart" markerWidth="12" markerHeight="10" refX="1" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+              <path d="M11,0 L11,8 L0,4 z" fill="context-stroke"/>
+            </marker>
+            <style>text { letter-spacing: 0; }</style>
+          </defs>
+          <rect width="1800" height="1320" fill="#fbfcfe"/>
+
+          <text x="900" y="54" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="38" font-weight="800" fill="#14213d">How we separated NCCL and checkpoint traffic on one EFA fabric</text>
+          <text x="900" y="90" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="19" font-weight="700" fill="#53627a">Three controlled 90-second arms plus synchronized before/after evidence</text>
+          <rect x="1515" y="22" width="235" height="43" rx="21" fill="#edf9f1" stroke="#149447" stroke-width="2"/>
+          <text x="1632" y="49" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="13" font-weight="800" fill="#149447">REPRODUCIBLE METHOD</text>
+
+          <rect x="48" y="122" width="1704" height="208" rx="15" fill="#edf2ff" stroke="#3767e8" stroke-width="2.5" filter="url(#att-softShadow)"/>
+          <text x="76" y="157" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="25" font-weight="800" fill="#3767e8">Controlled topology held constant</text>
+          <rect x="78" y="177" width="376" height="118" rx="12" fill="#ffffff" stroke="#3767e8" stroke-width="2.5" filter="url(#att-softShadow)"/><text x="96" y="208" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#3767e8">P5 worker A</text><text x="96" y="236" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="650" fill="#14213d"><tspan x="96" dy="0">8 H100 | 32 EFA devices</tspan><tspan x="96" dy="21">ranks 0-7 | writer target: GPU 0</tspan></text>
+          <rect x="508" y="177" width="376" height="118" rx="12" fill="#ffffff" stroke="#13a9c6" stroke-width="2.5" filter="url(#att-softShadow)"/><text x="526" y="208" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#13a9c6">P5 worker B</text><text x="526" y="236" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="650" fill="#14213d"><tspan x="526" dy="0">8 H100 | 32 EFA devices</tspan><tspan x="526" dy="21">ranks 8-15 | writer target: GPU 0</tspan></text>
+          <line x1="454" y1="236" x2="505" y2="236" stroke="#6748d6" stroke-width="6" marker-start="url(#att-arrowStart)" marker-end="url(#att-arrowEnd)"/>
+          <text x="480" y="211" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="13" font-weight="800" fill="#6748d6">NCCL</text>
+          <rect x="948" y="177" width="370" height="118" rx="12" fill="#ffffff" stroke="#f1a208" stroke-width="2.5" filter="url(#att-softShadow)"/><text x="966" y="208" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#f1a208">Dedicated /fsx-efa</text><text x="966" y="236" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="650" fill="#14213d"><tspan x="966" dy="0">Persistent 2 | EFA enabled</tspan><tspan x="966" dy="21">Lustre 2.15 | same AZ</tspan></text>
+          <line x1="884" y1="236" x2="944" y2="236" stroke="#f1a208" stroke-width="6" marker-end="url(#att-arrowEnd)"/>
+          <text x="914" y="211" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="12" font-weight="800" fill="#f1a208">GPUD</text>
+          <rect x="1380" y="177" width="340" height="118" rx="12" fill="#ffffff" stroke="#149447" stroke-width="2.5" filter="url(#att-softShadow)"/><text x="1398" y="208" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#149447">Same test contract</text><text x="1398" y="236" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="650" fill="#14213d"><tspan x="1398" dy="0">same nodes and duration</tspan><tspan x="1398" dy="21">same payloads and runner versions</tspan></text>
+
+          <text x="48" y="379" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="27" font-weight="800" fill="#14213d">Three arms create the attribution boundary</text>
+          <rect x="48" y="404" width="530" height="240" rx="15" fill="#f4f0ff" stroke="#6748d6" stroke-width="3" filter="url(#att-softShadow)"/>
+          <text x="76" y="444" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="25" font-weight="800" fill="#6748d6">A. NCCL only</text>
+          <text x="76" y="481" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="700" fill="#14213d"><tspan x="76" dy="0">16 ranks repeat validated all-reduce</tspan><tspan x="76" dy="26">256 MiB tensor per rank</tspan><tspan x="76" dy="26">AWS Libfabric + GDRDMA required</tspan></text>
+          <line x1="110" y1="578" x2="504" y2="578" stroke="#6748d6" stroke-width="7" marker-start="url(#att-arrowStart)" marker-end="url(#att-arrowEnd)"/>
+          <text x="307" y="557" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="800" fill="#6748d6">peer H100 traffic</text>
+          <text x="307" y="620" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="800" fill="#6748d6">Signature: rdma_write_bytes dominated</text>
+
+          <rect x="635" y="404" width="530" height="240" rx="15" fill="#fff8df" stroke="#f1a208" stroke-width="3" filter="url(#att-softShadow)"/>
+          <text x="663" y="444" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="25" font-weight="800" fill="#f1a208">B. Checkpoint only</text>
+          <text x="663" y="481" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="700" fill="#14213d"><tspan x="663" dy="0">one GPUD writer per worker</tspan><tspan x="663" dy="26">GPU 0 | 4 threads | fail closed</tspan><tspan x="663" dy="26">H100 -&gt; cuFile -&gt; Lustre -&gt; FSx</tspan></text>
+          <line x1="685" y1="578" x2="1115" y2="578" stroke="#f1a208" stroke-width="7" marker-end="url(#att-arrowEnd)"/>
+          <text x="900" y="557" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="800" fill="#f1a208">GPU-to-filesystem traffic</text>
+          <text x="900" y="620" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="800" fill="#f1a208">Signature: rdma_read_resp_bytes dominated</text>
+
+          <rect x="1222" y="404" width="530" height="240" rx="15" fill="#fff1f1" stroke="#d83742" stroke-width="3" filter="url(#att-softShadow)"/>
+          <text x="1250" y="444" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="25" font-weight="800" fill="#d83742">C. Synchronized overlap</text>
+          <text x="1250" y="481" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="700" fill="#14213d"><tspan x="1250" dy="0">same NCCL and GPUD parameters</tspan><tspan x="1250" dy="26">one shared future UTC start epoch</tspan><tspan x="1250" dy="26">only intended change: concurrency</tspan></text>
+          <line x1="1280" y1="578" x2="1472" y2="578" stroke="#6748d6" stroke-width="6" marker-start="url(#att-arrowStart)" marker-end="url(#att-arrowEnd)"/>
+          <line x1="1500" y1="578" x2="1692" y2="578" stroke="#f1a208" stroke-width="6" marker-end="url(#att-arrowEnd)"/>
+          <text x="1376" y="557" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="13" font-weight="800" fill="#6748d6">NCCL</text>
+          <text x="1596" y="557" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="13" font-weight="800" fill="#f1a208">GPUD</text>
+          <text x="1486" y="620" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="800" fill="#d83742">Both counter signatures appear</text>
+
+          <text x="48" y="696" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="27" font-weight="800" fill="#14213d">Every arm uses the same evidence timeline</text>
+          <rect x="48" y="722" width="1704" height="142" rx="14" fill="#ffffff" stroke="#7a8baa" stroke-width="2.5" filter="url(#att-softShadow)"/>
+          <rect x="78" y="746" width="300" height="91" rx="11" fill="#ffffff" stroke="#3767e8" stroke-width="2.5" filter="url(#att-softShadow)"/><circle cx="107" cy="774" r="17" fill="#3767e8"/><text x="107" y="780" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="800" fill="#ffffff">1</text><text x="132" y="776" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">Before snapshot</text><text x="96" y="806" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="12" font-weight="700" fill="#53627a"><tspan x="96" dy="0">UTC | EFA | LNet</tspan><tspan x="96" dy="17">nvidia_fs</tspan></text>
+          <line x1="386" y1="792" x2="482" y2="792" stroke="#3767e8" stroke-width="4" marker-end="url(#att-arrowEnd)"/>
+          <rect x="492" y="746" width="300" height="91" rx="11" fill="#ffffff" stroke="#13a9c6" stroke-width="2.5" filter="url(#att-softShadow)"/><circle cx="521" cy="774" r="17" fill="#13a9c6"/><text x="521" y="780" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="800" fill="#ffffff">2</text><text x="546" y="776" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">Future epoch</text><text x="510" y="806" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="12" font-weight="700" fill="#53627a"><tspan x="510" dy="0">all participants wait</tspan><tspan x="510" dy="17">for one timestamp</tspan></text>
+          <line x1="800" y1="792" x2="896" y2="792" stroke="#13a9c6" stroke-width="4" marker-end="url(#att-arrowEnd)"/>
+          <rect x="906" y="746" width="300" height="91" rx="11" fill="#ffffff" stroke="#6748d6" stroke-width="2.5" filter="url(#att-softShadow)"/><circle cx="935" cy="774" r="17" fill="#6748d6"/><text x="935" y="780" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="800" fill="#ffffff">3</text><text x="960" y="776" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">90-second arm</text><text x="924" y="806" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="12" font-weight="700" fill="#53627a"><tspan x="924" dy="0">fixed payloads</tspan><tspan x="924" dy="17">application records</tspan></text>
+          <line x1="1214" y1="792" x2="1310" y2="792" stroke="#6748d6" stroke-width="4" marker-end="url(#att-arrowEnd)"/>
+          <rect x="1320" y="746" width="300" height="91" rx="11" fill="#ffffff" stroke="#149447" stroke-width="2.5" filter="url(#att-softShadow)"/><circle cx="1349" cy="774" r="17" fill="#149447"/><text x="1349" y="780" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="800" fill="#ffffff">4</text><text x="1374" y="776" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">After snapshot</text><text x="1338" y="806" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="12" font-weight="700" fill="#53627a"><tspan x="1338" dy="0">same counters</tspan><tspan x="1338" dy="17">complete marker</tspan></text>
+
+          <text x="48" y="918" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="27" font-weight="800" fill="#14213d">Four measurement layers answer different questions</text>
+          <rect x="48" y="944" width="395" height="164" rx="12" fill="#f4f0ff" stroke="#6748d6" stroke-width="2.5" filter="url(#att-softShadow)"/><text x="66" y="975" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#6748d6">1. Application</text><text x="66" y="1003" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="650" fill="#14213d"><tspan x="66" dy="0">NCCL GB/s, bus GB/s, iterations</tspan><tspan x="66" dy="21">GPUD GiB/s, latency, XferType</tspan><tspan x="66" dy="21">primary performance evidence</tspan></text>
+          <rect x="483" y="944" width="395" height="164" rx="12" fill="#edf2ff" stroke="#3767e8" stroke-width="2.5" filter="url(#att-softShadow)"/><text x="501" y="975" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#3767e8">2. Runtime path</text><text x="501" y="1003" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="650" fill="#14213d"><tspan x="501" dy="0">AWS Libfabric + GDRDMA</tspan><tspan x="501" dy="21">GPUD; compatibility false</tspan><tspan x="501" dy="21">zero socket fallback</tspan></text>
+          <rect x="918" y="944" width="395" height="164" rx="12" fill="#eafafd" stroke="#13a9c6" stroke-width="2.5" filter="url(#att-softShadow)"/><text x="936" y="975" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#13a9c6">3. Host transport</text><text x="936" y="1003" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="650" fill="#14213d"><tspan x="936" dy="0">EFA counter deltas per NIC</tspan><tspan x="936" dy="21">nvidia_fs and LNet health</tspan><tspan x="936" dy="21">aggregate correlation evidence</tspan></text>
+          <rect x="1353" y="944" width="399" height="164" rx="12" fill="#edf9f1" stroke="#149447" stroke-width="2.5" filter="url(#att-softShadow)"/><text x="1371" y="975" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#149447">4. Service context</text><text x="1371" y="1003" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="650" fill="#14213d"><tspan x="1371" dy="0">FSx CloudWatch at 1 minute</tspan><tspan x="1371" dy="21">optional DCGM GPU context</tspan><tspan x="1371" dy="21">corroborating, not attribution</tspan></text>
+
+          <rect x="48" y="1147" width="1030" height="123" rx="12" fill="#14213d" stroke="#14213d" stroke-width="2"/>
+          <text x="78" y="1180" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="800" fill="#f1a208">CALCULATE</text>
+          <text x="220" y="1180" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#ffffff">counter delta = after - before</text>
+          <text x="78" y="1217" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="800" fill="#13a9c6">COMPARE</text>
+          <text x="220" y="1217" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#ffffff">change % = (overlap - isolated) / isolated x 100</text>
+          <text x="78" y="1254" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="800" fill="#149447">INTERPRET</text>
+          <text x="220" y="1254" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="16" font-weight="700" fill="#ffffff">application metrics measure impact; transport metrics prove the path</text>
+
+          <rect x="1118" y="1147" width="634" height="123" rx="12" fill="#fff8df" stroke="#f1a208" stroke-width="2.5" filter="url(#att-softShadow)"/>
+          <text x="1146" y="1181" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="21" font-weight="800" fill="#f1a208">Attribution boundary</text>
+          <text x="1146" y="1214" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="750" fill="#14213d"><tspan x="1146" dy="0">EFA counters are cumulative per NIC and port.</tspan><tspan x="1146" dy="20">Isolation plus timestamps supports correlation;</tspan><tspan x="1146" dy="20">it is not per-process or per-container accounting.</tspan></text>
+        </svg>
+      </button>
+      <p class="fig-cap"><span>Evidence model &middot; application metrics for performance, host and fabric counters for path proof and error-free execution</span>
+        <span class="zoomhint"><svg class="icon" aria-hidden="true"><use href="#i-zoom"></use></svg>Click to enlarge</span></p>
+    </div>
+    <div class="figleg" data-reveal style="--i:3">
+      <span class="sw"><span class="dot" style="background:var(--c-nccl)"></span><b>NCCL only</b> &rarr; <span class="mono">rdma_write_bytes</span> dominated</span>
+      <span class="sw"><span class="dot" style="background:var(--c-ckpt)"></span><b>Checkpoint only</b> &rarr; <span class="mono">rdma_read_resp_bytes</span> dominated</span>
+      <span class="sw"><span class="dot" style="background:var(--orange)"></span><b>Overlap</b> &rarr; both signatures present</span>
+    </div>
+    <p class="callout hard" data-reveal style="--i:4"><b>The isolated arms are what make the signatures readable.</b> EFA hardware counters remain NIC-aggregate: they do not tag bytes by PID, container, NCCL communicator, or cuFile handle. That is enough for controlled correlation in this experiment, and it is not per-process accounting.</p>
+  </div>
+</section>
+
+<section class="chapter" id="boundaries" data-index="08" aria-labelledby="t8" style="--accent:var(--red);--accent-2:var(--yellow)">
+  <p class="rail" aria-hidden="true">P5 EFA + FSx Contention Lab</p>
+  <div class="chapter-inner">
+    <p class="kicker" data-reveal style="--i:0">Interpretation and boundaries</p>
+    <h2 class="title" id="t8" data-reveal style="--i:1">Topology evidence, <span class="grad">not policy</span></h2>
+    <div class="grid-2" style="margin-top:calc(var(--u)*16);gap:calc(var(--u)*24);align-items:start">
+      <table class="dtable" data-reveal style="--i:2">
+        <thead><tr><th>Claim</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr style="--rc:var(--teal)"><td>Both stacks can drive EFA on this fleet</td>
+            <td><span class="ev ev-obs"><svg class="icon" aria-hidden="true"><use href="#i-eye"></use></svg>Observed, gated</span></td></tr>
+          <tr style="--rc:var(--blue)"><td>EFA Lustre outperformed the TCP path here</td>
+            <td><span class="ev ev-mea"><svg class="icon" aria-hidden="true"><use href="#i-gauge"></use></svg>Measured once per phase</span></td></tr>
+          <tr style="--rc:var(--blue)"><td>Overlap cost storage more than collectives</td>
+            <td><span class="ev ev-mea"><svg class="icon" aria-hidden="true"><use href="#i-gauge"></use></svg>Measured once per arm</span></td></tr>
+          <tr style="--rc:var(--yellow)"><td>Counter signatures separate the two workloads</td>
+            <td><span class="ev ev-dir"><svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg>Correlated, this experiment only</span></td></tr>
+          <tr style="--rc:var(--red)"><td>These deltas have confidence intervals</td>
+            <td><span class="ev ev-no"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>Not measured &middot; n = 1 per arm</span></td></tr>
+          <tr style="--rc:var(--red)"><td>A real checkpoint stack behaves this way</td>
+            <td><span class="ev ev-no"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>Not tested &middot; synthetic writer</span></td></tr>
+          <tr style="--rc:var(--red)"><td>Trainer step time was affected by this much</td>
+            <td><span class="ev ev-no"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>Not measured &middot; no training loop</span></td></tr>
+          <tr style="--rc:var(--red)"><td>EFA bytes attributed to a process or rank</td>
+            <td><span class="ev ev-no"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>Not possible &middot; NIC-aggregate</span></td></tr>
+          <tr style="--rc:var(--red)"><td>Every P5 or FSx workload behaves this way</td>
+            <td><span class="ev ev-no"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>Not supported &middot; one topology</span></td></tr>
+        </tbody>
+      </table>
+      <div style="display:flex;flex-direction:column;gap:calc(var(--u)*11)">
+        <p class="lede" data-reveal style="--i:3;font-size:var(--t-body)">The operational read is narrow and useful: asynchronous checkpointing reduces trainer blocking, but it does not make storage traffic free. Before this becomes a production policy, the lab asks for five things.</p>
+        <ul class="strip" data-reveal style="--i:4">
+          <li class="strip-item" style="--sc:var(--yellow)"><span class="n">01</span><span>Repeat each arm several times and report <b>confidence intervals</b></span></li>
+          <li class="strip-item" style="--sc:var(--yellow)"><span class="n">02</span><span>Replace the synthetic writer with the <b>application's real checkpoint stack</b></span></li>
+          <li class="strip-item" style="--sc:var(--yellow)"><span class="n">03</span><span>Sweep <b>checkpoint concurrency</b> and file stripe settings</span></li>
+          <li class="strip-item" style="--sc:var(--yellow)"><span class="n">04</span><span>Correlate step-time, NCCL, cuFile, Lustre and EFA metrics on <b>one timeline</b></span></li>
+          <li class="strip-item" style="--sc:var(--yellow)"><span class="n">05</span><span>Revalidate after any change to <b>AMI, kernel, driver, CUDA, GDS or FSx type</b></span></li>
+        </ul>
+        <p class="banner" data-reveal style="--accent:var(--red);--i:5"><svg class="icon" aria-hidden="true"><use href="#i-shield"></use></svg>
+          <span>One controlled synthetic 90-second run per arm on one two-node Spot allocation. <b>Repeat the experiment before turning these values into policy.</b></span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="chapter" id="source" data-index="09" aria-labelledby="t9" style="--accent:var(--teal);--accent-2:var(--blue)">
+  <p class="rail" aria-hidden="true">P5 EFA + FSx Contention Lab</p>
+  <div class="chapter-inner">
+    <p class="kicker" data-reveal style="--i:0">Source</p>
+    <h2 class="title" id="t9" data-reveal style="--i:1">Reproduce it from <span class="grad">a clean clone</span></h2>
+    <p class="lede" data-reveal style="--i:2">The repository carries the cluster contract, the Terraform for the optional EFA-enabled filesystem, every runner with its gates, the sanitized evidence in both human and machine-readable form, and the attribution rules.</p>
+    <div class="repo" style="margin-top:calc(var(--u)*20)">
+      <div class="repo-list">
+        <div class="repo-item" data-reveal style="--accent:var(--orange);--i:3">
+          <span class="glyph"><svg class="icon" aria-hidden="true"><use href="#i-server"></use></svg></span><div><strong>cluster.template.yaml</strong><span>Slurm queue and P5/EFA cluster contract</span></div></div>
+        <div class="repo-item" data-reveal style="--accent:var(--purple);--i:4">
+          <span class="glyph"><svg class="icon" aria-hidden="true"><use href="#i-cpu"></use></svg></span><div><strong>terraform/</strong><span>ParallelCluster and optional EFA-enabled FSx</span></div></div>
+        <div class="repo-item" data-reveal style="--accent:var(--green);--i:5">
+          <span class="glyph"><svg class="icon" aria-hidden="true"><use href="#i-flask"></use></svg></span><div><strong>storage-benchmark/</strong><span>NCCL, GDS, fio, inventory and counter tools</span></div></div>
+        <div class="repo-item" data-reveal style="--accent:var(--teal);--i:6">
+          <span class="glyph"><svg class="icon" aria-hidden="true"><use href="#i-terminal"></use></svg></span><div><strong>REPRODUCTION.md</strong><span>Clean-clone runbook, arm by arm</span></div></div>
+        <div class="repo-item" data-reveal style="--accent:var(--blue);--i:7">
+          <span class="glyph"><svg class="icon" aria-hidden="true"><use href="#i-gauge"></use></svg></span><div><strong>results/</strong><span>Validation report and summary JSON</span></div></div>
+        <div class="repo-item" data-reveal style="--accent:var(--red);--i:8">
+          <span class="glyph"><svg class="icon" aria-hidden="true"><use href="#i-eye"></use></svg></span><div><strong>METRICS.md</strong><span>Metric ownership and attribution rules</span></div></div>
+      </div>
+      <div class="repo-panel" data-reveal style="--i:4">
+        <div class="qr-wrap"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 33 33" shape-rendering="crispEdges" class="qr-svg" role="img" aria-label="QR code linking to https://github.com/murubhas/p5-efa-fsx-contention-lab"><path fill="#ffffff" d="M0 0h33v33H0z"/><path stroke="#0B1120" d="M0 0.5h7M8 0.5h4M13 0.5h1M16 0.5h2M22 0.5h1M26 0.5h7M0 1.5h1M6 1.5h1M9 1.5h2M12 1.5h1M17 1.5h1M20 1.5h3M24 1.5h1M26 1.5h1M32 1.5h1M0 2.5h1M2 2.5h3M6 2.5h1M8 2.5h3M13 2.5h1M15 2.5h5M21 2.5h3M26 2.5h1M28 2.5h3M32 2.5h1M0 3.5h1M2 3.5h3M6 3.5h1M9 3.5h1M21 3.5h2M26 3.5h1M28 3.5h3M32 3.5h1M0 4.5h1M2 4.5h3M6 4.5h1M9 4.5h1M12 4.5h2M15 4.5h1M17 4.5h2M21 4.5h1M26 4.5h1M28 4.5h3M32 4.5h1M0 5.5h1M6 5.5h1M8 5.5h3M12 5.5h1M14 5.5h2M17 5.5h1M20 5.5h2M24 5.5h1M26 5.5h1M32 5.5h1M0 6.5h7M8 6.5h1M10 6.5h1M12 6.5h1M14 6.5h1M16 6.5h1M18 6.5h1M20 6.5h1M22 6.5h1M24 6.5h1M26 6.5h7M11 7.5h2M14 7.5h3M24 7.5h1M0 8.5h1M2 8.5h1M6 8.5h2M10 8.5h1M14 8.5h1M19 8.5h1M22 8.5h2M27 8.5h1M30 8.5h1M32 8.5h1M1 9.5h3M5 9.5h1M10 9.5h1M13 9.5h1M15 9.5h6M23 9.5h2M26 9.5h1M29 9.5h1M32 9.5h1M0 10.5h9M11 10.5h2M15 10.5h1M19 10.5h1M21 10.5h1M23 10.5h2M29 10.5h2M32 10.5h1M1 11.5h2M8 11.5h1M10 11.5h1M13 11.5h1M15 11.5h3M20 11.5h1M25 11.5h1M27 11.5h3M32 11.5h1M3 12.5h4M9 12.5h1M12 12.5h2M17 12.5h1M20 12.5h1M24 12.5h1M26 12.5h2M32 12.5h1M1 13.5h3M5 13.5h1M9 13.5h1M13 13.5h1M19 13.5h3M23 13.5h2M26 13.5h1M31 13.5h2M1 14.5h1M5 14.5h2M9 14.5h1M12 14.5h1M14 14.5h2M17 14.5h1M19 14.5h2M23 14.5h2M27 14.5h2M30 14.5h1M32 14.5h1M0 15.5h1M2 15.5h1M4 15.5h2M7 15.5h3M11 15.5h2M18 15.5h1M20 15.5h1M24 15.5h3M28 15.5h1M1 16.5h2M5 16.5h2M8 16.5h1M11 16.5h6M20 16.5h1M23 16.5h2M26 16.5h2M29 16.5h1M31 16.5h1M0 17.5h3M4 17.5h2M8 17.5h1M10 17.5h1M12 17.5h2M15 17.5h1M19 17.5h3M23 17.5h2M26 17.5h1M29 17.5h1M32 17.5h1M1 18.5h1M4 18.5h1M6 18.5h1M8 18.5h1M10 18.5h3M15 18.5h1M17 18.5h3M21 18.5h7M29 18.5h2M32 18.5h1M0 19.5h1M3 19.5h1M12 19.5h2M15 19.5h1M18 19.5h3M22 19.5h1M24 19.5h3M28 19.5h2M31 19.5h1M0 20.5h1M4 20.5h1M6 20.5h1M11 20.5h1M15 20.5h4M20 20.5h1M23 20.5h1M26 20.5h1M32 20.5h1M3 21.5h1M5 21.5h1M7 21.5h1M9 21.5h2M12 21.5h3M16 21.5h1M18 21.5h3M23 21.5h2M26 21.5h2M29 21.5h2M32 21.5h1M0 22.5h3M5 22.5h3M9 22.5h1M13 22.5h2M16 22.5h1M18 22.5h2M22 22.5h3M26 22.5h1M30 22.5h1M32 22.5h1M2 23.5h2M5 23.5h1M9 23.5h1M14 23.5h3M20 23.5h1M22 23.5h5M29 23.5h1M31 23.5h1M0 24.5h2M3 24.5h1M6 24.5h1M9 24.5h6M20 24.5h1M24 24.5h6M32 24.5h1M8 25.5h2M11 25.5h1M14 25.5h4M19 25.5h1M21 25.5h1M23 25.5h2M28 25.5h1M32 25.5h1M0 26.5h7M8 26.5h2M13 26.5h3M19 26.5h1M24 26.5h1M26 26.5h1M28 26.5h3M32 26.5h1M0 27.5h1M6 27.5h1M10 27.5h3M14 27.5h1M17 27.5h1M20 27.5h1M22 27.5h3M28 27.5h2M31 27.5h1M0 28.5h1M2 28.5h3M6 28.5h1M10 28.5h3M15 28.5h1M17 28.5h1M20 28.5h1M23 28.5h6M0 29.5h1M2 29.5h3M6 29.5h1M9 29.5h1M11 29.5h1M13 29.5h1M17 29.5h1M19 29.5h1M21 29.5h1M23 29.5h1M25 29.5h1M27 29.5h3M31 29.5h2M0 30.5h1M2 30.5h3M6 30.5h1M8 30.5h3M13 30.5h3M17 30.5h4M23 30.5h1M25 30.5h1M27 30.5h3M31 30.5h2M0 31.5h1M6 31.5h1M9 31.5h1M11 31.5h1M19 31.5h2M22 31.5h1M24 31.5h6M0 32.5h7M8 32.5h1M12 32.5h1M14 32.5h3M20 32.5h1M24 32.5h1M27 32.5h2M32 32.5h1"/></svg>
+        </div>
+        <h3>p5-efa-fsx-contention-lab</h3>
+        <p class="repo-url mono">github.com/murubhas/p5-efa-fsx-contention-lab</p>
+        <div class="repo-actions">
+          <a class="btn primary" href="https://github.com/murubhas/p5-efa-fsx-contention-lab" target="_blank" rel="noreferrer noopener"><svg class="icon" aria-hidden="true"><use href="#i-external"></use></svg>Open repository</a>
+          <button class="btn" id="copyRepo" type="button"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg>Copy URL</button>
+        </div>
+      </div>
+    </div>
+    <p class="closing" data-reveal style="--i:10;margin-top:calc(var(--u)*18)">
+      <b>Gate the path.</b> <span>Isolate before you overlap. Say what the counters cannot say.</span></p>
+  </div>
+</section>
+
+<section class="chapter" id="appendix-contract" data-index="A" aria-labelledby="ta1" style="--accent:var(--purple);--accent-2:var(--blue)">
+  <p class="rail" aria-hidden="true">P5 EFA + FSx Contention Lab</p>
+  <div class="chapter-inner">
+    <p class="kicker" data-reveal style="--i:0">Appendix A</p>
+    <h2 class="title" id="ta1" data-reveal style="--i:1">Eleven components, <span class="grad">all pinned and observed</span></h2>
+    <p class="lede" data-reveal style="--i:2">A GPUDirect Storage path is a compatibility chain. Any one of these moving silently can turn a measured result into an artifact, which is why every version is recorded with the evidence rather than assumed from the AMI name.</p>
+    <div class="spec" style="margin-top:calc(var(--u)*22)">
+      <div class="spec-item" data-reveal style="--sc:var(--blue);--i:3"><span>OS</span><b>Ubuntu 22.04.5 LTS</b></div>
+      <div class="spec-item" data-reveal style="--sc:var(--blue);--i:4"><span>Kernel</span><b class="mono">6.8.0-1029-aws</b></div>
+      <div class="spec-item" data-reveal style="--sc:var(--green);--i:5"><span>NVIDIA driver</span><b>570.86.15</b></div>
+      <div class="spec-item" data-reveal style="--sc:var(--green);--i:6"><span>CUDA</span><b>12.8</b></div>
+      <div class="spec-item" data-reveal style="--sc:var(--teal);--i:7"><span>GDS release</span><b>1.13.0.11</b></div>
+      <div class="spec-item" data-reveal style="--sc:var(--teal);--i:8"><span><span class="mono">nvidia_fs</span></span><b>2.24.2</b></div>
+      <div class="spec-item" data-reveal style="--sc:var(--teal);--i:9"><span>Lustre client</span><b>2.15.6</b></div>
+      <div class="spec-item" data-reveal style="--sc:var(--orange);--i:10"><span>EFA driver</span><b>2.15.0g</b></div>
+      <div class="spec-item" data-reveal style="--sc:var(--purple);--i:11"><span>NCCL</span><b>2.26.2</b></div>
+      <div class="spec-item" data-reveal style="--sc:var(--purple);--i:12"><span><span class="mono">aws-ofi-nccl</span></span><b>1.14.2</b></div>
+      <div class="spec-item" data-reveal style="--sc:var(--orange);--i:13"><span>libfabric</span><b>2.1</b></div>
+      <div class="spec-item" data-reveal style="--sc:var(--dim);--i:14"><span>Scheduler</span><b>ParallelCluster + Slurm</b></div>
+    </div>
+    <p class="banner" data-reveal style="--accent:var(--purple);--i:15;margin-top:calc(var(--u)*20)"><svg class="icon" aria-hidden="true"><use href="#i-layers"></use></svg>
+      <span>Revalidate the whole chain after changing <b>any</b> link. A GDS path that silently falls back to compatibility mode still returns numbers &mdash; just not the ones you are claiming.</span></p>
+  </div>
+</section>
+
+<section class="chapter" id="appendix-ceiling" data-index="B" aria-labelledby="tb1" style="--accent:var(--teal);--accent-2:var(--green)">
+  <p class="rail" aria-hidden="true">P5 EFA + FSx Contention Lab</p>
+  <div class="chapter-inner">
+    <p class="kicker" data-reveal style="--i:0">Appendix B</p>
+    <h2 class="title" id="tb1" data-reveal style="--i:1">A separate GDS run <span class="grad">suggests storage headroom</span></h2>
+    <p class="lede" data-reveal style="--i:2">A separate fail-closed GDS test drove all eight GPUs on one worker. Comparing it with the two-writer checkpoint arm makes an obvious aggregate filesystem ceiling less likely &mdash; but it does not rule out workload-specific saturation.
+      <span class="ev ev-mea" style="margin-left:calc(var(--u)*6)"><svg class="icon" aria-hidden="true"><use href="#i-gauge"></use></svg>Measured</span></p>
+    <div class="charts" style="margin-top:calc(var(--u)*20)">
+      <div class="chart" data-reveal style="--i:3">
+        <div class="chart-h"><b>GPUD aggregate throughput</b><span>higher is better &middot; GiB/s</span></div>
+        <div class="bars">
+          <div class="bar-row"><span class="cat">8-GPU write</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:91.5%;--bc:var(--c-efa)"></div></div>
+            <span class="val">20.128<s> GiB/s</s></span></div>
+          <div class="bar-row"><span class="cat">8-GPU read</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:89.3%;--bc:var(--c-efa)"></div></div>
+            <span class="val">19.643<s> GiB/s</s></span></div>
+          <div class="bar-row"><span class="cat">Arm B write</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:30.1%;--bc:var(--c-iso)"></div></div>
+            <span class="val">6.625<s> GiB/s</s></span></div>
+          <div class="bar-row"><span class="cat">Arm C write</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:25.7%;--bc:var(--c-ovl)"></div></div>
+            <span class="val">5.660<s> GiB/s</s></span></div>
+        </div>
+        <div class="axis"><span>0</span><span>11</span><span>22 GiB/s</span></div>
+      </div>
+      <div class="chart" data-reveal style="--i:4">
+        <div class="chart-h"><b>Mean operation latency</b><span>lower is better &middot; milliseconds</span></div>
+        <div class="bars">
+          <div class="bar-row"><span class="cat">8-GPU write</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:97.1%;--bc:var(--c-efa)"></div></div>
+            <span class="val">1.553<s> ms</s></span></div>
+          <div class="bar-row"><span class="cat">8-GPU read</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:99.4%;--bc:var(--c-efa)"></div></div>
+            <span class="val">1.591<s> ms</s></span></div>
+          <div class="bar-row"><span class="cat">Arm B write</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:73.7%;--bc:var(--c-iso)"></div></div>
+            <span class="val">1.180<s> ms</s></span></div>
+          <div class="bar-row"><span class="cat">Arm C write</span>
+            <div class="bar-track"><div class="bar-fill" style="--w:86.3%;--bc:var(--c-ovl)"></div></div>
+            <span class="val">1.381<s> ms</s></span></div>
+        </div>
+        <div class="axis"><span>0</span><span>0.8</span><span>1.6 ms</span></div>
+      </div>
+    </div>
+    <div class="legend" data-reveal style="--i:5;margin-top:calc(var(--u)*14)">
+      <i style="--bc:var(--c-efa)">8-GPU GDS ceiling test &middot; one worker, all 8 GPUs</i>
+      <i style="--bc:var(--c-iso)">Arm B &middot; checkpoint only</i>
+      <i style="--bc:var(--c-ovl)">Arm C &middot; overlap</i>
+    </div>
+    <p class="callout" data-reveal style="--i:6;margin-top:calc(var(--u)*14)"><b>Not the same shape.</b> The ceiling test used eight writers on one worker; the checkpoint arms used one writer with four threads on each of two workers. Treat this as a headroom sanity check, not a like-for-like scaling curve.</p>
+  </div>
+</section>
+
+<section class="chapter" id="appendix-counters" data-index="C" aria-labelledby="tc1" style="--accent:var(--orange);--accent-2:var(--yellow)">
+  <p class="rail" aria-hidden="true">P5 EFA + FSx Contention Lab</p>
+  <div class="chapter-inner">
+    <p class="kicker" data-reveal style="--i:0">Appendix C</p>
+    <h2 class="title" id="tc1" data-reveal style="--i:1">Each workload left a <span class="grad">different fingerprint</span></h2>
+    <p class="lede" data-reveal style="--i:2">EFA counters were delta-sampled before and after each measurement window. Because the isolated arms ran alone, their signatures are distinct in this controlled run &mdash; and the overlap arm's containing both is what confirms the two paths were genuinely concurrent.</p>
+    <table class="dtable" data-reveal style="--i:3;margin-top:calc(var(--u)*18)">
+      <thead><tr><th>Arm</th><th>Dominant EFA counter</th><th class="r">Volume over the window</th><th>What it proves</th></tr></thead>
+      <tbody>
+        <tr style="--rc:var(--c-nccl)"><td>A &middot; NCCL only</td>
+          <td class="mono">rdma_write_bytes</td>
+          <td class="r"><b>&asymp; 30 TB</b></td>
+          <td>Collectives push payload outbound over SRD</td></tr>
+        <tr style="--rc:var(--c-ckpt)"><td>B &middot; Checkpoint only</td>
+          <td class="mono">rdma_read_resp_bytes</td>
+          <td class="r"><b>&asymp; 639 GB</b></td>
+          <td>The filesystem pulls from GPU memory; the writer is the target, not the sender</td></tr>
+        <tr style="--rc:var(--orange)"><td>C &middot; Overlap</td>
+          <td class="mono">both</td>
+          <td class="r"><b>both present</b></td>
+          <td>The two paths were concurrent on the same NICs, in the same window</td></tr>
+      </tbody>
+    </table>
+    <div class="grid-2" data-reveal style="--i:4;margin-top:calc(var(--u)*16);align-items:stretch">
+      <p class="banner" style="--accent:var(--green)"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>
+        <span><b>What the counters do prove:</b> the intended transport carried the traffic, in the exact window, with zero RDMA write errors and zero receive drops.</span></p>
+      <p class="banner" style="--accent:var(--red)"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+        <span><b>What they cannot prove:</b> which process, container, NCCL communicator or cuFile handle produced any given byte. Counters are per NIC and port.</span></p>
+    </div>
+    <p class="note" data-reveal style="--i:5;margin-top:calc(var(--u)*14)">The two volumes are not comparable as a ratio &mdash; they count different operations on different sides of the transfer. The <em>direction</em> of each signature is the evidence, not its magnitude.</p>
+  </div>
+</section>
+
+<section class="chapter" id="appendix-sources" data-index="D" aria-labelledby="td1" style="--accent:var(--blue);--accent-2:var(--teal)">
+  <p class="rail" aria-hidden="true">P5 EFA + FSx Contention Lab</p>
+  <div class="chapter-inner">
+    <p class="kicker" data-reveal style="--i:0">Appendix D</p>
+    <h2 class="title" id="td1" data-reveal style="--i:1">Sources, <span class="grad">separated by kind</span></h2>
+    <p class="lede" data-reveal style="--i:2">Every number in this deck resolves to one of these. Nothing here is estimated from a datasheet.</p>
+    <table class="dtable" data-reveal style="--i:3;margin-top:calc(var(--u)*18)">
+      <thead><tr><th>Source</th><th>Kind</th><th>Carries</th></tr></thead>
+      <tbody>
+        <tr style="--rc:var(--blue)"><td class="mono">results/&hellip;-summary.json</td>
+          <td><span class="ev ev-mea"><svg class="icon" aria-hidden="true"><use href="#i-braces"></use></svg>Machine-readable</span></td>
+          <td>Topology, software contract, all four workloads, deltas, gates, signatures</td></tr>
+        <tr style="--rc:var(--teal)"><td class="mono">results/&hellip;-validation.md</td>
+          <td><span class="ev ev-obs"><svg class="icon" aria-hidden="true"><use href="#i-eye"></use></svg>Report</span></td>
+          <td>Method, arms, results, proof gates, interpretation, resource lifecycle</td></tr>
+        <tr style="--rc:var(--green)"><td class="mono">storage-benchmark/REPRODUCTION.md</td>
+          <td><span class="ev ev-con"><svg class="icon" aria-hidden="true"><use href="#i-terminal"></use></svg>Runbook</span></td>
+          <td>Clean-clone reproduction, arm by arm</td></tr>
+        <tr style="--rc:var(--yellow)"><td class="mono">storage-benchmark/METRICS.md</td>
+          <td><span class="ev ev-dir"><svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg>Rules</span></td>
+          <td>Metric ownership and what each counter may be used to claim</td></tr>
+        <tr style="--rc:var(--purple)"><td class="mono">assets/*.svg</td>
+          <td><span class="ev ev-con"><svg class="icon" aria-hidden="true"><use href="#i-book"></use></svg>Diagrams</span></td>
+          <td>The two figures in chapters 01 and 07, at source resolution</td></tr>
+        <tr style="--rc:var(--orange)"><td class="mono">docs/&hellip;-animation.html</td>
+          <td><span class="ev ev-con"><svg class="icon" aria-hidden="true"><use href="#i-play"></use></svg>Explainer</span></td>
+          <td>The five-phase animated walkthrough of the same method</td></tr>
+      </tbody>
+    </table>
+    <p class="banner" data-reveal style="--accent:var(--blue);--i:4;margin-top:calc(var(--u)*16)"><svg class="icon" aria-hidden="true"><use href="#i-github"></use></svg>
+      <span>Terraform tests run against mocked providers and create no AWS resources. <b>A real plan against reviewed VPC, subnet, security-group, FSx and S3 inputs is still required before deployment.</b></span></p>
+    <p class="note" data-reveal style="--i:5;margin-top:calc(var(--u)*12)">Never publish Terraform state, plans, credentials, account identifiers, private addresses, generated cluster configuration, or raw logs. The repository's publication check enforces this on every push.</p>
+  </div>
+</section>
+</main>
+
+<div class="zoom" id="zoom" role="dialog" aria-modal="true" aria-labelledby="zoomTitle">
+  <div class="zoom-bar">
+    <span id="zoomTitle">Figure</span>
+    <span class="note" style="margin-left:auto;margin-right:8px">Arrows / PageUp / PageDown scroll &middot; F fits to height &middot; Esc closes</span>
+    <span style="display:flex;gap:8px">
+      <button class="icon-btn" id="zoomFit" type="button" aria-label="Toggle fit to height" title="Fit to height"><svg class="icon" aria-hidden="true"><use href="#i-fit"></use></svg></button>
+      <button class="icon-btn" id="zoomClose" type="button" aria-label="Close figure" title="Close (Esc)"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
+    </span>
+  </div>
+  <div class="zoom-body" id="zoomBody" tabindex="0" aria-label="Figure, scrollable"></div>
+</div>
+
+<div class="present-bar" aria-label="Presentation controls">
+  <button class="icon-btn" id="prevSlide" type="button" aria-label="Previous slide" title="Previous (Left arrow)"><svg class="icon" aria-hidden="true"><use href="#i-left"></use></svg></button>
+  <span class="counter" id="counter" aria-live="polite"><b>1</b> / 14</span>
+  <button class="icon-btn" id="nextSlide" type="button" aria-label="Next slide" title="Next (Right arrow or Space)"><svg class="icon" aria-hidden="true"><use href="#i-right"></use></svg></button>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  'use strict';
+  const REPO = 'https://github.com/murubhas/p5-efa-fsx-contention-lab';
+  const THEME_KEY = 'p5-efa-fsx-deck-theme';
+  const body = document.body, root = document.documentElement;
+  const chapters = [...document.querySelectorAll('.chapter')];
+  const links = [...document.querySelectorAll('.chapter-link')];
+  const readBtn = document.getElementById('readMode');
+  const presentBtn = document.getElementById('presentMode');
+  const progressBar = document.getElementById('progressBar');
+  const counter = document.getElementById('counter');
+  const themeIcon = document.getElementById('themeIcon');
+  const themeToggle = document.getElementById('themeToggle');
+  const toast = document.getElementById('toast');
+  const zoom = document.getElementById('zoom');
+  const zoomBody = document.getElementById('zoomBody');
+  const zoomTitle = document.getElementById('zoomTitle');
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const isPresent = () => body.classList.contains('present-mode');
+  const zoomOpen = () => zoom.classList.contains('open');
+  let current = Math.max(0, chapters.findIndex((c) => c.id === location.hash.slice(1)));
+  let toastTimer;
+
+  function announce(msg) {
+    toast.textContent = msg; toast.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('show'), 1700);
+  }
+
+  const FIT_FLOOR = 0.62, FIT_STEP = 0.035;
+  function fit(chapter, attempt = 0) {
+    chapter.style.removeProperty('--fs-fit');
+    chapter.classList.remove('overflowing');
+    if (!isPresent()) return;
+    const inner = chapter.querySelector('.chapter-inner');
+    if (!inner) return;
+    const avail = () => {
+      const cs = getComputedStyle(chapter);
+      return chapter.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    };
+    if (avail() < 200) { if (attempt < 6) requestAnimationFrame(() => fit(chapter, attempt + 1)); return; }
+    let f = 1, guard = 0;
+    while (inner.getBoundingClientRect().height > avail() + 1 && f > FIT_FLOOR && guard++ < 20) {
+      f = Math.round((f - FIT_STEP) * 1000) / 1000;
+      chapter.style.setProperty('--fs-fit', f);
+    }
+    if (inner.getBoundingClientRect().height > avail() + 1) chapter.classList.add('overflowing');
+  }
+  function fitAll() {
+    if (!isPresent()) { chapters.forEach((c) => { c.style.removeProperty('--fs-fit'); c.classList.remove('overflowing'); }); return; }
+    fit(chapters[current]);
+  }
+
+  function setActive(index, syncHash = true) {
+    current = Math.min(Math.max(index, 0), chapters.length - 1);
+    chapters.forEach((c, i) => c.classList.toggle('active', i === current));
+    links.forEach((l, i) => { l.classList.toggle('active', i === current); l.setAttribute('aria-current', i === current ? 'true' : 'false'); });
+    progressBar.style.width = (((current + 1) / chapters.length) * 100) + '%';
+    counter.innerHTML = '<b>' + (current + 1) + '</b> / ' + chapters.length;
+    if (syncHash) history.replaceState(null, '', '#' + chapters[current].id);
+    if (isPresent()) {
+      const slide = chapters[current];
+      slide.scrollTop = 0;
+      fit(slide);
+      requestAnimationFrame(() => fit(slide));
+    }
+  }
+
+  let spyLockUntil = 0;
+  const lockSpy = (ms = 1000) => { spyLockUntil = performance.now() + ms; };
+  const spyLocked = () => performance.now() < spyLockUntil;
+
+  function go(index) {
+    const clamped = Math.min(Math.max(index, 0), chapters.length - 1);
+    setActive(clamped);
+    if (!isPresent()) { lockSpy(); chapters[clamped].scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' }); }
+  }
+
+  function setMode(mode) {
+    const present = mode === 'present';
+    body.classList.toggle('present-mode', present);
+    readBtn.setAttribute('aria-pressed', String(!present));
+    presentBtn.setAttribute('aria-pressed', String(present));
+    setActive(current, false);
+    if (present) { fitAll(); requestAnimationFrame(fitAll); }
+    else { fitAll(); requestAnimationFrame(() => chapters[current].scrollIntoView({ block: 'start' })); }
+  }
+
+  function setTheme(theme) {
+    root.dataset.theme = theme;
+    const dark = theme === 'dark';
+    themeIcon.setAttribute('href', dark ? '#i-sun' : '#i-moon');
+    themeToggle.setAttribute('aria-label', dark ? 'Use light theme' : 'Use dark theme');
+    try { localStorage.setItem(THEME_KEY, theme); } catch (_) {}
+  }
+
+  /* ---- figure zoom -------------------------------------------------
+     Clones the figure into a full-viewport overlay. Ids are re-suffixed
+     so the clone does not duplicate the original's filter/marker ids. */
+  let lastZoomTrigger = null;
+  function openZoom(btn) {
+    const svg = btn.querySelector('svg');
+    if (!svg) return;
+    const clone = svg.cloneNode(true);
+    clone.removeAttribute('class');
+    let markup = clone.outerHTML;
+    [...svg.querySelectorAll('[id]')].forEach((el) => {
+      const id = el.id;
+      markup = markup.split('id="' + id + '"').join('id="' + id + '-z"')
+                     .split('url(#' + id + ')').join('url(#' + id + '-z)');
+    });
+    zoomBody.innerHTML = markup;
+    zoomTitle.textContent = btn.getAttribute('aria-label').replace(/^Enlarge figure:\s*/, '');
+    zoom.classList.add('open');
+    lastZoomTrigger = btn;
+    zoomBody.classList.remove('fit');
+    zoomBody.scrollTop = 0;
+    zoomBody.scrollLeft = 0;
+    zoomBody.focus();
+  }
+  function closeZoom() {
+    zoom.classList.remove('open');
+    zoomBody.innerHTML = '';
+    if (lastZoomTrigger) { lastZoomTrigger.focus(); lastZoomTrigger = null; }
+  }
+  document.querySelectorAll('[data-zoom]').forEach((b) => b.addEventListener('click', () => openZoom(b)));
+  document.getElementById('zoomClose').addEventListener('click', closeZoom);
+  document.getElementById('zoomFit').addEventListener('click', () => zoomBody.classList.toggle('fit'));
+  zoom.addEventListener('click', (e) => { if (e.target === zoom) closeZoom(); });
+
+  readBtn.addEventListener('click', () => setMode('read'));
+  presentBtn.addEventListener('click', () => setMode('present'));
+  links.forEach((l, i) => l.addEventListener('click', () => go(i)));
+  document.getElementById('prevSlide').addEventListener('click', () => go(current - 1));
+  document.getElementById('nextSlide').addEventListener('click', () => go(current + 1));
+  document.getElementById('printButton').addEventListener('click', () => window.print());
+  themeToggle.addEventListener('click', () => setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark'));
+
+  document.getElementById('fullButton').addEventListener('click', async () => {
+    try { if (!document.fullscreenElement) await root.requestFullscreen(); else await document.exitFullscreen(); }
+    catch (_) { announce('Full screen is unavailable in this browser'); }
+  });
+
+  document.getElementById('copyRepo').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(REPO); announce('Repository URL copied'); }
+    catch (_) {
+      const a = document.createElement('textarea');
+      a.value = REPO; a.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(a); a.select();
+      try { document.execCommand('copy'); announce('Repository URL copied'); }
+      catch (_e) { announce('Copy failed - select the URL manually'); }
+      a.remove();
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    const k = e.key;
+    if (zoomOpen()) {
+      if (k === 'Escape') { e.preventDefault(); closeZoom(); return; }
+      const step = Math.round(zoomBody.clientHeight * 0.85);
+      if (k === 'ArrowDown') { e.preventDefault(); zoomBody.scrollBy({ top: 80 }); }
+      else if (k === 'ArrowUp') { e.preventDefault(); zoomBody.scrollBy({ top: -80 }); }
+      else if (k === 'ArrowRight') { e.preventDefault(); zoomBody.scrollBy({ left: 80 }); }
+      else if (k === 'ArrowLeft') { e.preventDefault(); zoomBody.scrollBy({ left: -80 }); }
+      else if (k === 'PageDown' || k === ' ') { e.preventDefault(); zoomBody.scrollBy({ top: step }); }
+      else if (k === 'PageUp') { e.preventDefault(); zoomBody.scrollBy({ top: -step }); }
+      else if (k === 'Home') { e.preventDefault(); zoomBody.scrollTop = 0; }
+      else if (k === 'End') { e.preventDefault(); zoomBody.scrollTop = zoomBody.scrollHeight; }
+      else if (k === 'f' || k === 'F') { e.preventDefault(); zoomBody.classList.toggle('fit'); }
+      return;
+    }
+    if (k === 't' || k === 'T') { setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark'); return; }
+    if (k === 'p' || k === 'P') { e.preventDefault(); setMode(isPresent() ? 'read' : 'present'); return; }
+    if (k === 'f' || k === 'F') { e.preventDefault(); document.getElementById('fullButton').click(); return; }
+    if (k === 'z' || k === 'Z') {
+      const b = chapters[current].querySelector('[data-zoom]');
+      if (b) { e.preventDefault(); openZoom(b); }
+      return;
+    }
+    if (k === 'Escape' && isPresent()) { setMode('read'); return; }
+    if (!isPresent()) return;
+    if (k === 'ArrowRight' || k === 'PageDown' || k === ' ') { e.preventDefault(); go(current + 1); }
+    else if (k === 'ArrowLeft' || k === 'PageUp') { e.preventDefault(); go(current - 1); }
+    else if (k === 'Home') { e.preventDefault(); go(0); }
+    else if (k === 'End') { e.preventDefault(); go(chapters.length - 1); }
+  });
+
+  const spy = new IntersectionObserver((entries) => {
+    if (isPresent() || spyLocked()) return;
+    const vis = entries.filter((x) => x.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+    if (vis) setActive(chapters.indexOf(vis.target));
+  }, { rootMargin: '-24% 0px -54% 0px', threshold: [0, 0.15, 0.45] });
+  chapters.forEach((c) => spy.observe(c));
+
+  const revealTargets = document.querySelectorAll('[data-reveal]');
+  if (reduceMotion) { revealTargets.forEach((el) => el.classList.add('in')); }
+  else {
+    const rev = new IntersectionObserver((entries) => {
+      entries.forEach((en) => { if (en.isIntersecting) { en.target.classList.add('in'); rev.unobserve(en.target); } });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.06 });
+    revealTargets.forEach((el) => rev.observe(el));
+  }
+
+  window.addEventListener('hashchange', () => {
+    const i = chapters.findIndex((c) => c.id === location.hash.slice(1));
+    if (i >= 0) go(i);
+  });
+  window.addEventListener('scrollend', () => { spyLockUntil = 0; });
+  let resizeTimer;
+  window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(fitAll, 130); });
+  window.addEventListener('beforeprint', () => { revealTargets.forEach((el) => el.classList.add('in')); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitAll).catch(() => {});
+
+  let stored = 'dark';
+  try { stored = localStorage.getItem(THEME_KEY) || 'dark'; } catch (_) {}
+  setTheme(stored);
+  if (new URLSearchParams(location.search).has('present')) setMode('present');
+  setActive(current, false);
+  if (current > 0 && !isPresent()) {
+    lockSpy(1400);
+    const t = chapters[current];
+    t.scrollIntoView({ behavior: 'auto', block: 'start' });
+    requestAnimationFrame(() => t.scrollIntoView({ behavior: 'auto', block: 'start' }));
+  }
+})();
+</script>
+</body>
+</html>

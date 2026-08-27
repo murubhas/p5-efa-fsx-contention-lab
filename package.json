@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "verify:animation": "node scripts/verify_efa_fsx_animation.mjs",
-    "check:node": "node --check scripts/verify_efa_fsx_animation.mjs",
+    "verify:deck": "node scripts/verify_efa_fsx_demo_deck.mjs",
+    "verify:visuals": "npm run verify:animation && npm run verify:deck",
+    "check:node": "node --check scripts/verify_efa_fsx_animation.mjs && node --check scripts/verify_efa_fsx_demo_deck.mjs",
     "check:shell": "bash -n scripts/publication_check.sh storage-benchmark/*.sh",
     "check:python": "python3 -m py_compile storage-benchmark/*.py",
     "check:terraform": "terraform -chdir=terraform fmt -check -recursive && terraform -chdir=terraform validate && terraform -chdir=terraform test",

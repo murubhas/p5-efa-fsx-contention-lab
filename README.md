@@ -19,6 +19,7 @@ Persistent 2 filesystem for GPUD writes.
 
 | Goal | Resource |
 |---|---|
+| Present or skim the whole result in 15 minutes | [Fifteen-minute demo deck](https://murubhas.github.io/p5-efa-fsx-contention-lab/docs/p5-efa-fsx-contention-15min-demo.html) |
 | Understand the experiment visually | [Animated five-phase explainer](https://murubhas.github.io/p5-efa-fsx-contention-lab/docs/p5-efa-fsx-contention-animation.html) |
 | Reproduce it from a clean clone | [Reproduction guide](storage-benchmark/REPRODUCTION.md) |
 | Understand metric ownership | [Metrics and attribution guide](storage-benchmark/METRICS.md) |
@@ -108,7 +109,7 @@ accounting.
 ```text
 .
 |-- assets/                 Static architecture and attribution diagrams
-|-- docs/                   Self-contained animated HTML explainer
+|-- docs/                   Self-contained HTML explainer and demo deck
 |-- results/                Sanitized human- and machine-readable evidence
 |-- storage-benchmark/      NCCL, GDS, fio, inventory, and counter tools
 |-- terraform/              ParallelCluster and optional EFA-enabled FSx
@@ -128,11 +129,13 @@ The Terraform tests use mocked providers and create no AWS resources. A real
 plan against reviewed VPC, subnet, security-group, FSx, and S3 inputs is still
 required before deployment.
 
-On macOS with Google Chrome installed, validate the animation at four viewport
-sizes plus reduced-motion mode:
+On macOS with Google Chrome installed, validate both published pages. The
+animation is checked at four viewport sizes plus reduced-motion mode; the demo
+deck is checked in read and present mode at four viewport sizes plus the light
+theme, and every chapter must fit its slide without overflowing.
 
 ```bash
-npm run verify:animation
+npm run verify:visuals
 ```
 
 ## Cost and safety boundary

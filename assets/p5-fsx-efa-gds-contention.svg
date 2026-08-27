@@ -36,7 +36,7 @@
   <rect x="80" y="510" width="690" height="116" rx="11" fill="#ffffff" stroke="#13a9c6" stroke-width="2"/>
   <text x="425" y="541" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#13a9c6">EFA device layer</text>
   <text x="425" y="574" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">aws-ofi-nccl + libfabric | Lustre + kefalnd</text>
-  <text x="425" y="603" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="700" fill="#53627a">32 local EFA rails; zero errors or drops</text>
+  <text x="425" y="603" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="700" fill="#53627a">32 local EFA devices; zero errors or drops</text>
 
   <rect x="1000" y="265" width="750" height="405" rx="16" fill="#eafafd" stroke="#13a9c6" stroke-width="3" filter="url(#softShadow)"/>
   <text x="1028" y="307" text-anchor="start" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="29" font-weight="800" fill="#13a9c6">P5 worker B</text>
@@ -46,7 +46,7 @@
   <rect x="1030" y="510" width="690" height="116" rx="11" fill="#ffffff" stroke="#13a9c6" stroke-width="2"/>
   <text x="1375" y="541" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="20" font-weight="800" fill="#13a9c6">EFA device layer</text>
   <text x="1375" y="574" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="17" font-weight="800" fill="#14213d">aws-ofi-nccl + libfabric | Lustre + kefalnd</text>
-  <text x="1375" y="603" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="700" fill="#53627a">32 local EFA rails; zero errors or drops</text>
+  <text x="1375" y="603" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="14" font-weight="700" fill="#53627a">32 local EFA devices; zero errors or drops</text>
 
   <line x1="808" y1="401" x2="992" y2="401" stroke="#6748d6" stroke-width="8" marker-start="url(#arrowStart)" marker-end="url(#arrowEnd)"/>
   <text x="900" y="350" text-anchor="middle" font-family="Chalkboard SE, Comic Sans MS, ui-rounded, sans-serif" font-size="15" font-weight="800" fill="#6748d6"><tspan x="900" dy="0">NCCL collective</tspan><tspan x="900" dy="22">EFA / SRD</tspan><tspan x="900" dy="22">GPUDirect RDMA</tspan></text>
