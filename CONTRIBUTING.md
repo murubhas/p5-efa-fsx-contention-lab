@@ -15,7 +15,7 @@ transport proof, and aggregate correlation evidence.
    application's complete checkpoint stack.
 5. Require positive `AWS Libfabric` and `GDRDMA` evidence and reject NCCL
    `NET/Socket` fallback for an EFA transport claim.
-6. Require `GPUD` with cuFile compatibility fallback disabled for a GDS claim.
+6. Require `XferType: GPUD` with cuFile compatibility fallback disabled for a GDS claim.
 7. Treat EFA hardware counters as per-NIC correlation evidence, not
    per-process accounting.
 8. Run the repository checks before opening a pull request.

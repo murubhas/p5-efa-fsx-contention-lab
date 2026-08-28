@@ -10,8 +10,8 @@ The experiment has three 90-second arms on the same exclusive two-node P5
 allocation:
 
 1. NCCL all-reduce only;
-2. checkpoint-like GPUD writes only;
-3. NCCL and GPUD writes beginning at the same future UTC epoch.
+2. checkpoint-like GDS writes only;
+3. NCCL and GDS writes beginning at the same future UTC epoch.
 
 The result is a topology-specific contention measurement, not a general AWS,
 FSx, NCCL, or training-performance claim.
@@ -338,7 +338,7 @@ Keep the following evidence together for each arm:
 - start and end timestamps;
 - NCCL algorithmic payload, estimated bus bandwidth, iterations, and rank
   correctness;
-- GPUD throughput, latency, transfer type, and fallback setting;
+- GDS throughput, latency, transfer type, and fallback setting;
 - EFA counter deltas per worker and aggregate;
 - `nvidia_fs` before/after statistics;
 - LNet network, peer, and error statistics;

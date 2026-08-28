@@ -8,7 +8,7 @@ at the same time.
 
 The validated topology used two Spot `p5.48xlarge` workers, 16 NVIDIA H100
 GPUs, AWS Libfabric/GDRDMA for NCCL, and a dedicated EFA-enabled FSx for Lustre
-Persistent 2 filesystem for GPUD writes.
+Persistent 2 filesystem for GPUDirect Storage (GDS) writes.
 
 > **Measured result, not a universal claim:** in one controlled 90-second run
 > per arm, overlap reduced NCCL payload throughput by 1.9%, reduced checkpoint
@@ -52,7 +52,7 @@ change?
 Three matched arms run on one exclusive two-node allocation:
 
 1. **NCCL only:** 16-rank, correctness-checked all-reduce.
-2. **Checkpoint only:** one fail-closed GPUD writer per worker.
+2. **Checkpoint only:** one fail-closed GDS writer per worker.
 3. **Synchronized overlap:** both workloads begin at the same future UTC epoch.
 
 The isolated arms establish each workload's baseline and EFA-counter signature.
@@ -88,7 +88,7 @@ will behave the same way.
 Application metrics are authoritative for performance:
 
 - the NCCL benchmark reports rank correctness, payload GB/s, and bus GB/s;
-- `gdsio` reports `GPUD`, GiB/s, and operation latency.
+- `gdsio` reports `XferType: GPUD`, GiB/s, and operation latency.
 
 Runtime and host evidence prove the intended path:
 

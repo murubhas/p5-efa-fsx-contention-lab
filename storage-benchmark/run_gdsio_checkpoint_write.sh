@@ -113,7 +113,7 @@ CUFILE_ENV_PATH_JSON="${CUFILE_CONFIG}" \
   > "${OUT_DIR}/write-gpu-${GPU_INDEX}.txt" 2>&1
 
 grep -q 'XferType: GPUD' "${OUT_DIR}/write-gpu-${GPU_INDEX}.txt" || {
-  echo "Checkpoint writer did not report the GPUD transfer type" >&2
+  echo "Checkpoint writer did not report XferType: GPUD" >&2
   cat "${OUT_DIR}/write-gpu-${GPU_INDEX}.txt" >&2
   exit 1
 }
@@ -137,7 +137,7 @@ match = re.search(
     text,
 )
 if not match or match.group("xfer") != "GPUD":
-    raise SystemExit("Could not parse fail-closed GPUD checkpoint output")
+    raise SystemExit("Could not parse fail-closed GDS checkpoint output (XferType: GPUD)")
 summary = {
     "label": label,
     "host": host,

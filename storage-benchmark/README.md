@@ -15,9 +15,9 @@ For an audience-facing walkthrough, open the self-contained
 The kit contains independent and overlapping test arms for:
 
 1. POSIX `fio` over an existing TCP FSx mount and an EFA-enabled FSx mount;
-2. fail-closed GPUD reads and writes with NVIDIA `gdsio`;
+2. fail-closed GDS reads and writes with NVIDIA `gdsio`;
 3. a 16-rank NCCL all-reduce over AWS Libfabric and EFA;
-4. synchronized NCCL and checkpoint-like GPUD writers;
+4. synchronized NCCL and checkpoint-like GDS writers;
 5. before/after EFA hardware-counter collection.
 
 It intentionally separates application metrics from transport proof. NCCL and
@@ -48,12 +48,12 @@ absent and refuses to stack a second EFA LNet configuration.
 | `configure_efa_preserve_tcp.sh` | Add regular or GDS-optimized EFA LNet without removing TCP |
 | `install_nvidia_fs.sh` | Pin, build, and load the validated `nvidia_fs` module |
 | `run_fio_transport.sh` | Matched POSIX write/read test against a selected mount |
-| `run_gdsio_transport.sh` | All-GPU, fail-closed GPUD write/read test |
-| `run_gdsio_checkpoint_write.sh` | One checkpoint-like GPUD writer per node |
+| `run_gdsio_transport.sh` | All-GPU, fail-closed GDS write/read test |
+| `run_gdsio_checkpoint_write.sh` | One checkpoint-like GDS writer per node |
 | `nccl_allreduce_benchmark.py` | Duration-bounded, correctness-checked NCCL workload |
 | `run_nccl_benchmark_node.sh` | Start eight NCCL ranks on one worker |
 | `run_nccl_slurm_step.sh` | Slurm-native two-node launcher when permitted |
-| `run_ssm_pair.sh` | Least-privilege two-worker launcher for NCCL or GPUD through Systems Manager |
+| `run_ssm_pair.sh` | Least-privilege two-worker launcher for NCCL or GDS through Systems Manager |
 | `summarize_efa_hardware_counters.py` | Aggregate EFA counter deltas across workers |
 
 ## Safe sequence
@@ -62,7 +62,7 @@ absent and refuses to stack a second EFA LNet configuration.
 2. Capture inventory before modifying LNet or loading `nvidia_fs`.
 3. Configure EFA LNet in `gds` mode while preserving the TCP mount.
 4. Mount the EFA-enabled filesystem at `/fsx-efa`.
-5. Run a one-GPU GPUD smoke and reject compatibility fallback.
+5. Run a one-GPU GDS smoke and reject compatibility fallback.
 6. Run matched TCP and EFA POSIX controls.
 7. Run the eight-GPU GDS test.
 8. Run NCCL-only and checkpoint-only baselines.
@@ -126,6 +126,6 @@ python3 summarize_efa_hardware_counters.py <result-directory>
 
 The counters are aggregated per NIC and host. Isolated baselines can reveal
 useful signatures, but the counters do not provide per-process attribution.
-Correlate them with NCCL completion records, GPUD output, and benchmark start
+Correlate them with NCCL completion records, `gdsio` output, and benchmark start
 and end timestamps. See [`METRICS.md`](METRICS.md) for the complete measurement
 model and optional continuous-monitoring queries.

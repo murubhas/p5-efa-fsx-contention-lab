@@ -136,7 +136,7 @@ run_phase() {
   for ((gpu = 0; gpu < GPU_COUNT; gpu++)); do
     output=${OUT_DIR}/${operation}-gpu-${gpu}.txt
     grep -q 'XferType: GPUD' "${output}" || {
-      echo "GPU ${gpu} did not report the GPUD transfer type during ${operation}" >&2
+      echo "GPU ${gpu} did not report XferType: GPUD during ${operation}" >&2
       cat "${output}" >&2
       exit 1
     }

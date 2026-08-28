@@ -1,7 +1,7 @@
 # Metrics and EFA traffic attribution
 
 This reference explains what each measurement means, who emits it, and how the
-experiment separates NCCL collective traffic from checkpoint-like GPUD traffic.
+experiment separates NCCL collective traffic from checkpoint-like GDS traffic.
 
 ## The attribution boundary
 
@@ -13,12 +13,12 @@ accounting.
 Instead, it uses controlled attribution:
 
 1. run NCCL alone and capture `after - before` EFA deltas;
-2. run GPUD checkpoint writers alone and capture the same deltas;
+2. run GDS checkpoint writers alone and capture the same deltas;
 3. run both from one shared future UTC epoch;
 4. correlate each counter signature with application completion records and
    identical benchmark windows.
 
-In the validated run, NCCL-only was dominated by `rdma_write_bytes`, the GPUD
+In the validated run, NCCL-only was dominated by `rdma_write_bytes`, the GDS
 write arm was dominated by `rdma_read_resp_bytes`, and overlap contained both.
 These are useful signatures for this tested topology, not universal protocol
 rules.
@@ -30,7 +30,7 @@ rules.
 | Layer | Source | What it answers | Authority |
 |---|---|---|---|
 | Workload | NCCL benchmark | Did all ranks complete, and at what payload/bus rate? | Primary performance metric for collectives |
-| Workload | `gdsio` | Was the transfer GPUD, and at what GiB/s and latency? | Primary performance metric for checkpoint I/O |
+| Workload | `gdsio` | Was `XferType: GPUD` reported, and at what GiB/s and latency? | Primary performance metric for checkpoint I/O |
 | Runtime | NCCL logs | Was AWS Libfabric/GDRDMA selected, with no socket fallback? | Transport proof |
 | Runtime | cuFile config and output | Was compatibility fallback disabled? | GDS path proof |
 | Host | EFA hardware counters | Which NIC-level traffic and errors changed in the window? | Aggregate correlation evidence |
@@ -63,12 +63,12 @@ filesystem pressure at coarser resolution.
 - AWS Libfabric and GDRDMA initialization records;
 - any socket fallback record.
 
-### GPUD checkpoint writer
+### GPUDirect Storage checkpoint writer
 
 `run_gdsio_checkpoint_write.sh` records:
 
 - writer GPU, threads, duration, and file size per thread;
-- transfer type, which must be `GPUD`;
+- transfer marker, which must be `XferType: GPUD`;
 - write GiB/s and mean kernel latency;
 - compatibility-fallback policy, which must be false;
 - `nvidia_fs`, LNet, and EFA counters before and after.
@@ -259,4 +259,3 @@ threshold. One run is evidence, not an SLO.
 - [FSx for Lustre metrics](https://docs.aws.amazon.com/fsx/latest/LustreGuide/fs-metrics.html)
 - [Monitoring FSx with CloudWatch](https://docs.aws.amazon.com/fsx/latest/LustreGuide/monitoring-cloudwatch.html)
 - [NVIDIA GPUDirect Storage troubleshooting](https://docs.nvidia.com/gpudirect-storage/troubleshooting-guide/)
-

@@ -4,7 +4,7 @@ Date: 2026-08-27 UTC
 
 ## Result in one sentence
 
-On this controlled two-node P5 run, synchronized GPUD checkpoint-like writes
+On this controlled two-node P5 run, synchronized GPUDirect Storage (GDS) checkpoint-like writes
 reduced NCCL all-reduce payload throughput by 1.9%, while storage write
 throughput fell 14.6% and mean write latency rose 17.0%.
 
@@ -98,11 +98,11 @@ An eight-GPU fail-closed GDS test on one worker reported:
 
 ### Arm B: checkpoint only
 
-- one GPUD writer on GPU 0 of each worker;
+- one GDS writer on GPU 0 of each worker;
 - four writer threads per worker;
 - 16 GiB per thread;
 - both writers begin from one shared UTC start epoch;
-- fail closed if GPUD or EFA/Lustre peer discovery is absent.
+- fail closed if `XferType: GPUD` or EFA/Lustre peer discovery is absent.
 
 This is a checkpoint-like data-plane workload. It does not include PyTorch
 serialization, optimizer-state assembly, or Distributed Checkpoint metadata.

@@ -2,7 +2,7 @@
   "name": "p5-efa-fsx-contention-lab",
   "version": "1.0.0",
   "private": true,
-  "description": "A reproducible P5 experiment for NCCL and GPUD checkpoint contention over EFA and FSx for Lustre.",
+  "description": "A reproducible P5 experiment for NCCL and GPUDirect Storage checkpoint contention over EFA and FSx for Lustre.",
   "type": "module",
   "scripts": {
     "verify:animation": "node scripts/verify_efa_fsx_animation.mjs",

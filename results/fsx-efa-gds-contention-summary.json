@@ -78,7 +78,7 @@
     "checkpoint_only": {
       "duration_seconds": 90,
       "writers": 2,
-      "writer_placement": "one GPUD writer on GPU 0 of each worker",
+      "writer_placement": "one GPUDirect Storage (GDS) writer on GPU 0 of each worker",
       "threads_per_writer": 4,
       "size_per_thread": "16 GiB",
       "aggregate_write_GiBps": 6.624803,
